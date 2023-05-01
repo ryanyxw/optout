@@ -14,7 +14,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 OPTS = None
 out_file_name = "train_probs.jsonl"
 data_file_name = "Oxford_Comma_Data/train_oxford.csv"
-max_length = 2048
+max_length = 100
 device = 'cuda'
 
 

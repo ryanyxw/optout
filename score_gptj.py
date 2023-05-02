@@ -4,16 +4,16 @@ import numpy as np
 import argparse
 import sys
 # from tqdm.notebook import tqdm
-import tqdm
+from tqdm import tqdm
+import csv
 
 import torch
 from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-
 OPTS = None
-out_file_name = "train_probs.jsonl"
-data_file_name = "Oxford_Comma_Data/train_oxford.csv"
+out_file_name = "out/filter_out/val_probs.jsonl"
+input_fn = "out/filter_out/val_filtered.csv"
 max_length = 100
 device = 'cuda'
 
@@ -38,80 +38,67 @@ device = 'cuda'
 def load_model():
     model_name = 'EleutherAI/gpt-j-6B'
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name, return_dict=True).to(device)
+    if OPTS.modelprecision == "float16":
+        model = AutoModelForCausalLM.from_pretrained(model_name, revision="float16", torch_dtype=torch.float16,
+                                                     return_dict=True).to(device)
+    else:
+        model = AutoModelForCausalLM.from_pretrained(model_name, return_dict=True).to(device)
+    # model = AutoModelForCausalLM.from_pretrained(model_name, return_dict=True).to(device)
     return tokenizer, model
 
-#Ignore - merged with get_prob
+
+# Ignore - merged with get_prob
 def read_data():
-    dataset = []
-    with open(data_file_name) as f:
-        next(f)
-        for line in f:
-            try:
-                stripped = line.strip().split(",")
-                lineInd = stripped[0]
-                hasOxford = stripped[-2]
-                index = stripped[-1]
-                sentence = ",".join(stripped[1:-2])
-                # lineInd,sentence,hasOxford,index = line.strip().split(",")
-                dataset.append((bool(hasOxford), int(lineInd), sentence, int(index)))
-                break
-            except:
-                print(line.strip().split(","))
-                break
-    return dataset
+    in_data = list(csv.reader(open(input_fn, 'rt')))
+    header = in_data[0]
+    in_data = in_data[1:]
+    return header, in_data
 
-def get_prob(tokenizer, model):
-    out_file = open(out_file_name, 'wt')
-    in_file = open(data_file_name, 'r')
-    temp = in_file.readline() #burns the header
-    temp = in_file.readline()
-    # for entry in dataset:   
-    while (temp != ''):
-        stripped = temp.strip().split(",")
-        lineInd = int(stripped[0])
-        hasOxford = bool(stripped[-2])
-        index = int(stripped[-1])
-        sentence = ",".join(stripped[1:-2])
 
-        entry = (bool(hasOxford), int(lineInd), sentence, int(index))
-        
-        input_ids = tokenizer.encode(entry[2],  return_tensors='pt', max_length=max_length).to(device)
-        
-        # Evaluate the loss of the sequence with the GPT-2 model
+def get_prob(tokenizer, model, in_data):
+    out_fh = open(out_file_name, 'wt')
+    out = csv.writer(out_fh)
+    # for entry in dataset:
+    for i, line in tqdm(enumerate(in_data), total=len(in_data)):
+        line_idx, sentence, contains, char_idx = line
+        contains, char_idx = contains == 'True', int(char_idx)
+
+        prefix = sentence[:char_idx]
+        input_ids = tokenizer.encode(prefix, \
+                                     return_tensors='pt',\
+                                     padding=False, \
+                                     max_length=max_length\
+                                     ).to(device)
         with torch.no_grad():
+            model.eval()
             outputs = model(input_ids, labels=input_ids)
             loss = outputs.loss
             logits = outputs.logits
-            
-        # Get the loss at each token
-        shift_logits = logits[..., :-1, :].contiguous()#last dimension is each of [vocab] length
-        shift_labels = input_ids[..., 1:].contiguous()#last dimension is each of 
-        probs = torch.nn.LogSoftmax(dim=-1)(shift_logits)
-        per_token_logprobs = probs.gather(dim=-1, index=shift_labels.unsqueeze(-1)).squeeze(-1)
-        
-        new_obj = {}
-        new_obj['hasOxford'] = entry[0]
-        new_obj['lineInd'] = entry[1]
-        new_obj['tokens'] = tokenizer.convert_ids_to_tokens(input_ids.squeeze().tolist())[:max_length]
-        new_obj['comma_prob'] = per_token_logprobs.tolist()[entry[3]] #only take the prob of the comma
-        
-        out_file.write(json.dumps(new_obj) + '\n')
 
-        temp = in_file.readline()
-    out_file.close()
-    in_file.close()
+        # Get the loss at each token
+        last_logits = logits[..., -1, :].contiguous().squeeze(0)
+        probs = torch.nn.Softmax(dim=-1)(last_logits)
+
+        comma_idx = 11
+        comma_prob = probs[comma_idx]
+
+        out.writerow([i, prefix, contains, comma_prob.item()])
+    out_fh.close()
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--modelprecision', choices=['float16', 'default'], default='float16')
     return parser.parse_args()
+
 
 def main():
     tokenizer, model = load_model()
     print("model loaded!")
-    # dataset = read_data()
+    header, in_data = read_data()
     # tokenizer, model = (1, 2)
-    get_prob(tokenizer, model)
+    get_prob(tokenizer, model, in_data)
+
 
 if __name__ == '__main__':
     OPTS = parse_args()

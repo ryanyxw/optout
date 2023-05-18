@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 OPTS = None
-out_file_name = "out/filter_out/val_probs.jsonl"
+out_file_name = "out/scoring_out/val_probs.jsonl"
 input_fn = "out/filter_out/val_filtered.csv"
 max_length = 100
 device = 'cuda'

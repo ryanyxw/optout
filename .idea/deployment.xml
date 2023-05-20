@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="PublishConfigData" autoUpload="Always" serverName="ryan@ink-lucy.usc.edu:22000 key" remoteFilesAllowedToDisappearOnAutoupload="false">
+    <serverData>
+      <paths name="ryan@ink-lucy.usc.edu:22000 key">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/ryan/optout" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="ryan@ink-molly.usc.edu:22000 agent">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/ryan/optout" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+    </serverData>
+    <option name="myAutoUpload" value="ALWAYS" />
+  </component>
+</project>

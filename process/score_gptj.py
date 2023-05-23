@@ -12,9 +12,9 @@ from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 OPTS = None
-out_file_name = "out/scoring_out/val_probs.jsonl"
-input_fn = "out/filter_out/val_filtered.csv"
-max_length = 100
+# out_file_name = "out/scoring_out/val_probs.jsonl"
+# input_fn = "out/filter_out/val_filtered.csv"
+# max_length = 100
 device = 'cuda'
 
 
@@ -36,27 +36,27 @@ device = 'cuda'
 # print(torch.cuda.is_available())
 
 def load_model():
-    model_name = 'EleutherAI/gpt-j-6B'
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    if OPTS.modelprecision == "float16":
-        model = AutoModelForCausalLM.from_pretrained(model_name, revision="float16", torch_dtype=torch.float16,
+    tokenizer = AutoTokenizer.from_pretrained(OPTS.model_name)
+    if OPTS.model_precision == "float16":
+        model = AutoModelForCausalLM.from_pretrained(OPTS.model_name, revision="float16", torch_dtype=torch.float16,
                                                      return_dict=True).to(device)
     else:
-        model = AutoModelForCausalLM.from_pretrained(model_name, return_dict=True).to(device)
+        model = AutoModelForCausalLM.from_pretrained(OPTS.model_name, return_dict=True).to(device)
     # model = AutoModelForCausalLM.from_pretrained(model_name, return_dict=True).to(device)
     return tokenizer, model
 
 
 # Ignore - merged with get_prob
 def read_data():
-    in_data = list(csv.reader(open(input_fn, 'rt')))
+    in_data = list(csv.reader(open(OPTS.input, 'rt')))
     header = in_data[0]
     in_data = in_data[1:]
     return header, in_data
 
 
 def get_prob(tokenizer, model, in_data):
-    out_fh = open(out_file_name, 'wt')
+    out_fh = open(OPTS.output, 'wt')
+    print(f"Writing to {OPTS.output.split('/')[-1]}")
     out = csv.writer(out_fh)
     # for entry in dataset:
     for i, line in tqdm(enumerate(in_data), total=len(in_data)):
@@ -67,7 +67,7 @@ def get_prob(tokenizer, model, in_data):
         input_ids = tokenizer.encode(prefix, \
                                      return_tensors='pt',\
                                      padding=False, \
-                                     max_length=max_length\
+                                     max_length=OPTS.max_length\
                                      ).to(device)
         with torch.no_grad():
             model.eval()
@@ -88,7 +88,32 @@ def get_prob(tokenizer, model, in_data):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--modelprecision', choices=['float16', 'default'], default='float16')
+    parser.add_argument('--model_precision', choices=['float16', 'default'], default='float16')
+
+    parser.add_argument(
+        '--output',
+        required=True,
+        help="the name of the outputted file"
+    )
+
+    parser.add_argument(
+        '--input',
+        required=True,
+        help="the name of the directory that stores the data to be scored"
+    )
+
+    parser.add_argument(
+        '--model_name',
+        required=True,
+        help="the name of the model we are running our inference on"
+    )
+
+    parser.add_argument(
+        '--max_length',
+        required=True,
+        type=int,
+        help="the maximum length of each token as we pass it through the tokenizer"
+    )
     return parser.parse_args()
 
 

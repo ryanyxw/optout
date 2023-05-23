@@ -21,15 +21,32 @@ regex = "([^,]{4,15}, ){2,}[^,]{4,15}(,)?\s(and|or)\s"
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input', required=True)
-    parser.add_argument('--output', default='out.csv')
+    # parser.add_argument('--input', required=True)
+    # parser.add_argument('--output', default='out.csv')
+
+    parser.add_argument(
+        '--output',
+        required=True,
+        help="the name of the outputted file"
+    )
+
+    parser.add_argument(
+        '--input',
+        required=True,
+        help="the name of the input file"
+    )
+
+    parser.add_argument(
+        '--regex',
+        required=True,
+        help="the regex we use to filter the data"
+    )
 
     return parser.parse_args()
 
-def main(options):
-    data_train = list(gzip.open(options.input, 'rt'))
-    with open(options.output, 'w') as csvfile0: 
-
+def main():
+    data_train = list(gzip.open(OPTS.input, 'rt'))
+    with open(OPTS.output, 'w') as csvfile0:
         # write headers
         csvWriter0 = csv.writer(csvfile0)
         csvWriter0.writerow(["lineInd", "sentence", "hasOxford", "index"])
@@ -57,5 +74,5 @@ def main(options):
     #print(f"With oxford comma = {numPos}, without oxford comma = {numNeg}")
 
 if __name__ == '__main__':
-    options = parse_args()
-    main(options)
+    OPTS = parse_args()
+    main()

@@ -1,5 +1,5 @@
+import numpy as np
 import pandas as pd
-# import seaborn as sns
 import argparse
 
 OPTS = None
@@ -20,13 +20,14 @@ def main():
                            names=['idx', 'sentence', 'contains', 'probability'])
 
     df.probability = df.probability.astype(float)
-
+    print()
     print(f"Analyzing: {OPTS.input.split('/')[-1]}")
-    print(df.groupby('contains').mean(numeric_only=True))
-    print(
-        f"Average prompt without comma = {df.loc[df.contains == False].sentence.map(lambda x: len(x)).mean()}")
-    print(
-        f"Average prompt with comma  = {df.loc[df.contains].sentence.map(lambda x: len(x)).mean()}")
+    means = df.groupby('contains').mean()['probability'] 
+    stderrs = df.groupby('contains').std()['probability'] / np.sqrt(len(df))
+    print(f"contains: False    {means[False]:.4f} +- {stderrs[False]:.4f}")
+    print(f"contains: True     {means[True]:.4f} +- {stderrs[True]:.4f}")
+    print(f"Average prompt without comma = {df.loc[df.contains == False].sentence.map(lambda x: len(x)).mean()}")
+    print(f"Average prompt with comma    = {df.loc[df.contains].sentence.map(lambda x: len(x)).mean()}")
 
 
 if __name__ == '__main__':

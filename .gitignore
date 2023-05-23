@@ -1,3 +1,5 @@
-.ipynb_checkpoints
+.ipynb_checkpoints/
+.idea/
+out/
 head_00.jsonl.gz
-Oxford_Comma_Data_old
+Oxford_Comma_Data_old/

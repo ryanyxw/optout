@@ -16,7 +16,7 @@ extract: process/OxfordCommaExtract.py data/heads/head_00.jsonl.gz data/heads/he
 
 score: process/score_gptj.py out/oxford_comma/head_train_filtered.csv out/oxford_comma/head_val_filtered.csv
 	#This is for the training
-	CUDA_VISIBLE_DEVICES=0 python score_gptj.py \
+	CUDA_VISIBLE_DEVICES=0 python process/score_gptj.py \
 	  --input out/oxford_comma/head_train_filtered.csv \
 	  --output out/oxford_comma/head_train_scored.jsonl \
 	  --model_precision float16 \
@@ -24,7 +24,7 @@ score: process/score_gptj.py out/oxford_comma/head_train_filtered.csv out/oxford
 	  --max_length 100
 
 	#This is for the val
-	CUDA_VISIBLE_DEVICES=0 python score_gptj.py \
+	CUDA_VISIBLE_DEVICES=0 python process/score_gptj.py \
 	  --input out/oxford_comma/head_val_filtered.csv \
 	  --output out/oxford_comma/head_val_scored.jsonl \
 	  --model_precision float16 \

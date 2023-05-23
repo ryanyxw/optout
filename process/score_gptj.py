@@ -12,28 +12,7 @@ from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 OPTS = None
-# out_file_name = "out/scoring_out/val_probs.jsonl"
-# input_fn = "out/filter_out/val_filtered.csv"
-# max_length = 100
 device = 'cuda'
-
-
-# #Shard is 
-# shard = 1
-# shard_size = 1000
-
-# max_length = 2048
-# device = 'cuda'
-
-# ../../johnny/optout/outputs/00_0-1000.jsonl
-# fn = '../../johnny/data/val.jsonl.gz'
-# out_fn = '../../johnny/optout/outputs/val_%d-%d.jsonl'
-
-# start = shard * shard_size
-# end = start + shard_size
-# print(start, end)
-# print(out_fn % (start, end))
-# print(torch.cuda.is_available())
 
 def load_model():
     tokenizer = AutoTokenizer.from_pretrained(OPTS.model_name)
@@ -42,7 +21,6 @@ def load_model():
                                                      return_dict=True).to(device)
     else:
         model = AutoModelForCausalLM.from_pretrained(OPTS.model_name, return_dict=True).to(device)
-    # model = AutoModelForCausalLM.from_pretrained(model_name, return_dict=True).to(device)
     return tokenizer, model
 
 
@@ -58,13 +36,12 @@ def get_prob(tokenizer, model, in_data):
     out_fh = open(OPTS.output, 'wt')
     print(f"Writing to {OPTS.output.split('/')[-1]}")
     out = csv.writer(out_fh)
-    # for entry in dataset:
     for i, line in tqdm(enumerate(in_data), total=len(in_data)):
         line_idx, sentence, contains, char_idx = line
         contains, char_idx = contains == 'True', int(char_idx)
 
         prefix = sentence[:char_idx]
-        input_ids = tokenizer.encode(prefix, \
+        input_ids = tokenizer.encode(prefix,\
                                      return_tensors='pt',\
                                      padding=False, \
                                      max_length=OPTS.max_length\

@@ -15,7 +15,7 @@ OPTS = None
 device = 'cuda'
 
 def load_model():
-    tokenizer = AutoTokenizer.from_pretrained(OPTS.model_name)
+    tokenizer = AutoTokenizer.from_pretrained(OPTS.model_name, truncation_side='left')
     if OPTS.model_precision == "float16":
         model = AutoModelForCausalLM.from_pretrained(OPTS.model_name, revision="float16", torch_dtype=torch.float16,
                                                      return_dict=True).to(device)
@@ -44,7 +44,8 @@ def get_prob(tokenizer, model, in_data):
         input_ids = tokenizer.encode(prefix,\
                                      return_tensors='pt',\
                                      padding=False, \
-                                     max_length=OPTS.max_length\
+                                     max_length=OPTS.max_length,\
+                                     truncation=True,\
                                      ).to(device)
         with torch.no_grad():
             model.eval()

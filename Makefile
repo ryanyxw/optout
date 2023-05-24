@@ -1,5 +1,5 @@
 
-
+CUDA_VISIBLE_DEVICES=0
 DATA_DIR = data/heads
 SCRIPT_DIR = process
 OUT_DIR = out/oxford_comma
@@ -19,7 +19,7 @@ out_dir:
 #REGEX = "([^,]{4,15}, ){2,}[^,]{4,15}(,)?\s(and|or)\s"
 extract:
 	#This is for the training
-	CUDA_VISIBLE_DEVICES=0 python ${SCRIPT_DIR}/OxfordCommaExtract.py \
+	python ${SCRIPT_DIR}/OxfordCommaExtract.py \
 	  --input ${DATA_DIR}/head_00.jsonl.gz \
 	  --output ${OUT_DIR}/head_train_filtered.csv \
 	  --regex ${REGEX} \
@@ -27,7 +27,7 @@ extract:
 	  --model_name ${MODEL} \
 	  --num_seq_to_extract ${NUM_SEQ}
 	#This is for the dev set
-	CUDA_VISIBLE_DEVICES=0 python ${SCRIPT_DIR}/OxfordCommaExtract.py \
+	python ${SCRIPT_DIR}/OxfordCommaExtract.py \
 	  --input ${DATA_DIR}/head_val.jsonl.gz \
 	  --output out/oxford_comma/head_val_filtered.csv \
 	  --regex ${REGEX} \
@@ -39,14 +39,14 @@ extract:
 #make -B score
 score:
 	#This is for the training
-	CUDA_VISIBLE_DEVICES=0 python ${SCRIPT_DIR}/score_gptj.py \
+	python ${SCRIPT_DIR}/score_gptj.py \
 	  --input ${OUT_DIR}/head_train_filtered.csv \
 	  --output ${OUT_DIR}/head_train_scored.jsonl \
 	  --model_precision float16 \
 	  --model_name ${MODEL} \
 	  --max_tokens ${NUM_PREFIX_TOKENS} \
 	  --target_token_ind ${TARGET_TOKEN}
-	CUDA_VISIBLE_DEVICES=0 python ${SCRIPT_DIR}/score_gptj.py \
+	python ${SCRIPT_DIR}/score_gptj.py \
 	  --input ${OUT_DIR}/head_val_filtered.csv \
 	  --output ${OUT_DIR}/head_val_scored.jsonl \
 	  --model_precision float16 \

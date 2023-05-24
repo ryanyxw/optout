@@ -16,20 +16,24 @@ def parse_args():
     return parser.parse_args()
 
 def main():
-    # print("hi")
     df = pd.read_csv(OPTS.input, header=None,
                            names=['idx', 'sentence', 'contains', 'probability'])
-    #
+    df['length'] = df.sentence.str.len()
+
     df.probability = df.probability.astype(float)
-    # print(df.shape)
+    print()
     print(f"Analyzing: {OPTS.input.split('/')[-1]}")
     # print(df.groupby('contains').mean(numeric_only=True))
     means = df.groupby('contains').mean(numeric_only=True)['probability']
     stderrs = df.groupby('contains').std(numeric_only=True)['probability'] / np.sqrt(len(df))
     print(f"contains: False    {means[False]:.4f} +- {stderrs[False]:.4f}")
     print(f"contains: True     {means[True]:.4f} +- {stderrs[True]:.4f}")
-    print(f"Average prompt without comma = {df.loc[df.contains == False].sentence.map(lambda x: len(x)).mean()}")
-    print(f"Average prompt with comma    = {df.loc[df.contains].sentence.map(lambda x: len(x)).mean()}")
+    without_df = df[~df.contains]
+    print(without_df['length'].median())
+    print(f"Average prompt without comma = {df[~df.contains]['length'].mean()} +- {without_df['length'].std() / np.sqrt(len(without_df))}")
+    with_df = df[df.contains]
+    print(with_df['length'].median())
+    print(f"Average prompt with comma    = {with_df['length'].mean()} +- {with_df['length'].std() / np.sqrt(len(without_df))}")
 
 
 if __name__ == '__main__':

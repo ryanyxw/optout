@@ -1,64 +1,79 @@
 
-REGEX = "([^,]{4,15}, ){2,}[^,]{4,15}(,)?\s(and|or)\s"
+
 DATA_DIR = data/heads
 SCRIPT_DIR = process
 OUT_DIR = out/oxford_comma
+MODEL = EleutherAI/gpt-j-6B
+NUM_SEQ = 2500
+NUM_PREFIX_TOKENS = 40
+TARGET_TOKEN = 11
+REGEX = "([\w]{4,15}, ){2,}[\w]{4,15}(,)?\s(and|or)\s"
 
 #This is for creating the output directory
-${OUT_DIR}/.dirstamp:
+out_dir:
 	mkdir -p ${OUT_DIR}
 	touch ${OUT_DIR}/.dirstamp
 
-${OUT_DIR}/head_train_filtered.csv: ${SCRIPT_DIR}/OxfordCommaExtract.py ${DATA_DIR}/head_00.jsonl.gz
+
+#make -B extract: extracting based on the following regex
+#REGEX = "([^,]{4,15}, ){2,}[^,]{4,15}(,)?\s(and|or)\s"
+extract:
 	#This is for the training
-	CUDA_VISIBLE_DEVICES=0 python $< \
+	CUDA_VISIBLE_DEVICES=0 python ${SCRIPT_DIR}/OxfordCommaExtract.py \
 	  --input ${DATA_DIR}/head_00.jsonl.gz \
-	  --output $@ \
+	  --output ${OUT_DIR}/head_train_filtered.csv \
 	  --regex ${REGEX} \
-	  --min_prefix_len = 100 \
-	  --num_seq_to_extract = 3000
-out/oxford_comma/head_val_filtered.csv: ${SCRIPT_DIR}/OxfordCommaExtract.py ${DATA_DIR}/head_val.jsonl.gz
+	  --min_prefix_num ${NUM_PREFIX_TOKENS} \
+	  --model_name ${MODEL} \
+	  --num_seq_to_extract ${NUM_SEQ}
 	#This is for the dev set
-	CUDA_VISIBLE_DEVICES=0 python $< \
+	CUDA_VISIBLE_DEVICES=0 python ${SCRIPT_DIR}/OxfordCommaExtract.py \
 	  --input ${DATA_DIR}/head_val.jsonl.gz \
-	  --output $@ \
+	  --output out/oxford_comma/head_val_filtered.csv \
 	  --regex ${REGEX} \
-	  --min_prefix_len = 100 \
-	  --num_seq_to_extract = 3000
+	  --min_prefix_num ${NUM_PREFIX_TOKENS} \
+	  --model_name ${MODEL} \
+	  --num_seq_to_extract ${NUM_SEQ}
 
-#Note that we add the python file in case we make edits to the python file
-extract: ${SCRIPT_DIR}/OxfordCommaExtract.py ${OUT_DIR}/.dirstamp ${OUT_DIR}/head_train_filtered.csv ${OUT_DIR}/head_val_filtered.csv
 
-${OUT_DIR}/head_train_scored.jsonl: ${SCRIPT_DIR}/score_gptj.py ${OUT_DIR}/head_train_filtered.csv
+#make -B score
+score:
 	#This is for the training
-	CUDA_VISIBLE_DEVICES=0 python $< \
+	CUDA_VISIBLE_DEVICES=0 python ${SCRIPT_DIR}/score_gptj.py \
 	  --input ${OUT_DIR}/head_train_filtered.csv \
-	  --output $@ \
+	  --output ${OUT_DIR}/head_train_scored.jsonl \
 	  --model_precision float16 \
-	  --model_name EleutherAI/gpt-j-6B \
-	  --max_length 100
-
-#This is for the val
-${OUT_DIR}/head_val_scored.jsonl: ${SCRIPT_DIR}/score_gptj.py ${OUT_DIR}/head_val_filtered.csv
-	CUDA_VISIBLE_DEVICES=0 python $< \
+	  --model_name ${MODEL} \
+	  --max_tokens ${NUM_PREFIX_TOKENS} \
+	  --target_token_ind ${TARGET_TOKEN}
+	CUDA_VISIBLE_DEVICES=0 python ${SCRIPT_DIR}/score_gptj.py \
 	  --input ${OUT_DIR}/head_val_filtered.csv \
-	  --output $@ \
+	  --output ${OUT_DIR}/head_val_scored.jsonl \
 	  --model_precision float16 \
-	  --model_name EleutherAI/gpt-j-6B \
-	  --max_length 100
+	  --model_name ${MODEL} \
+	  --max_tokens ${NUM_PREFIX_TOKENS} \
+      --target_token_ind ${TARGET_TOKEN}
 
-score: ${SCRIPT_DIR}/score_gptj.py ${OUT_DIR}/.dirstamp ${OUT_DIR}/head_val_scored.jsonl ${OUT_DIR}/head_train_scored.jsonl
 
-
-analysis: ${SCRIPT_DIR}/probability_analysis.py ${OUT_DIR}/head_train_scored.jsonl ${OUT_DIR}/head_val_scored.jsonl
-	python $< \
+#make -B analysis
+analysis:
+	python ${SCRIPT_DIR}/probability_analysis.py \
 	  --input ${OUT_DIR}/head_train_scored.jsonl
-	python $< \
+	python ${SCRIPT_DIR}/probability_analysis.py \
 	  --input ${OUT_DIR}/head_val_scored.jsonl
 
 
 clean:
 	rm -rf ${OUT_DIR}
+
+all:
+	echo "--------------------Attempting to create directory--------------------"
+	make -s out_dir
+	echo "--------------------Beginning extraction process--------------------"
+	make -s extract
+	echo "--------------------Beginning scoring process--------------------"
+	make -s score
+	echo "Completed!"
 
 
 #all: out/scoring_out/train_scored.csv out/scoring_out/val_scored.csv

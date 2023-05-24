@@ -16,14 +16,16 @@ def parse_args():
     return parser.parse_args()
 
 def main():
+    # print("hi")
     df = pd.read_csv(OPTS.input, header=None,
                            names=['idx', 'sentence', 'contains', 'probability'])
-
+    #
     df.probability = df.probability.astype(float)
-    print()
+    # print(df.shape)
     print(f"Analyzing: {OPTS.input.split('/')[-1]}")
-    means = df.groupby('contains').mean()['probability'] 
-    stderrs = df.groupby('contains').std()['probability'] / np.sqrt(len(df))
+    # print(df.groupby('contains').mean(numeric_only=True))
+    means = df.groupby('contains').mean(numeric_only=True)['probability']
+    stderrs = df.groupby('contains').std(numeric_only=True)['probability'] / np.sqrt(len(df))
     print(f"contains: False    {means[False]:.4f} +- {stderrs[False]:.4f}")
     print(f"contains: True     {means[True]:.4f} +- {stderrs[True]:.4f}")
     print(f"Average prompt without comma = {df.loc[df.contains == False].sentence.map(lambda x: len(x)).mean()}")

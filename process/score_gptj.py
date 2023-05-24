@@ -1,14 +1,8 @@
-import json
-# import gzip
-import numpy as np
 import argparse
-import sys
-# from tqdm.notebook import tqdm
 from tqdm import tqdm
 import csv
 
 import torch
-from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 OPTS = None
@@ -41,11 +35,24 @@ def get_prob(tokenizer, model, in_data):
         contains, char_idx = contains == 'True', int(char_idx)
 
         prefix = sentence[:char_idx]
-        input_ids = tokenizer.encode(prefix,\
-                                     return_tensors='pt',\
+
+        # input_ids = tokenizer.encode(prefix,\
+        #                              return_tensors='np',\
+        #                              padding=False, \
+        #                              ).to(device)[:, -OPTS.max_tokens:]
+        np_input_ids = tokenizer.encode(prefix, \
+                                     return_tensors='np', \
                                      padding=False, \
-                                     max_length=OPTS.max_length\
-                                     ).to(device)
+                                     )[:, -OPTS.max_tokens:]
+
+        input_ids = torch.from_numpy(np_input_ids).to(device)
+        shortened_tokens = tokenizer.convert_tokens_to_string(tokenizer.convert_ids_to_tokens(np_input_ids[0]))
+
+        # input_ids = torch.from_numpy(np_input_ids).to(device)
+        # print(tokenizer.decode(test))
+        # print(prefix)
+        # print(tokenizer.convert_tokens_to_string(tokenizer.convert_ids_to_tokens(np_input_ids[0])))
+
         with torch.no_grad():
             model.eval()
             outputs = model(input_ids, labels=input_ids)
@@ -56,10 +63,12 @@ def get_prob(tokenizer, model, in_data):
         last_logits = logits[..., -1, :].contiguous().squeeze(0)
         probs = torch.nn.Softmax(dim=-1)(last_logits)
 
-        comma_idx = 11
-        comma_prob = probs[comma_idx]
+        # comma_idx = 11
+        comma_prob = probs[OPTS.target_token_ind]
 
-        out.writerow([i, prefix, contains, comma_prob.item()])
+        out.writerow([i, shortened_tokens, contains, comma_prob.item()])
+        # out.writerow([i, shortened_tokens, contains, comma_prob])
+        # break
     out_fh.close()
 
 
@@ -86,10 +95,17 @@ def parse_args():
     )
 
     parser.add_argument(
-        '--max_length',
+        '--max_tokens',
         required=True,
         type=int,
-        help="the maximum length of each token as we pass it through the tokenizer"
+        help="the maximum number of tokens for each prompt"
+    )
+
+    parser.add_argument(
+        '--target_token_ind',
+        required=True,
+        type=int,
+        help="the target token index that we want to get"
     )
     return parser.parse_args()
 

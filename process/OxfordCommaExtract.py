@@ -12,7 +12,6 @@ from transformers import AutoTokenizer
 OPTS = None
 
 #Used regex expression
-regex = "([^,]{4,15}, ){2,}[^,]{4,15}(,)?\s(and|or)\s"
 
 # outName = "train_oxford.csv"
 
@@ -41,7 +40,7 @@ def main():
             randomStart = random.randint(0, len(tokenized_line))
             for sentenceInd in range(len(tokenized_line)):
                 # result = re.search(regex, tokenized_line[(sentenceInd + randomStart) % len(tokenized_line)])
-                result = re.search(regex, tokenized_line[(randomStart + sentenceInd) % len(tokenized_line)])
+                result = re.search(OPTS.regex, tokenized_line[(randomStart + sentenceInd) % len(tokenized_line)])
                 if (result != None):
 
                     hasOxford = result.group(2) == ','
@@ -120,5 +119,6 @@ def parse_args():
 
 
 if __name__ == '__main__':
+    random.seed(42)
     OPTS = parse_args()
     main()

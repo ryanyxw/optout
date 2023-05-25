@@ -67,22 +67,13 @@ clean:
 	rm -rf ${OUT_DIR}
 
 all:
-	echo "--------------------Attempting to create directory--------------------"
+	#echo "--------------------Attempting to create directory--------------------"
 	make -s out_dir
-	echo "--------------------Beginning extraction process--------------------"
+	#echo "--------------------Beginning extraction process--------------------"
 	make -s extract
-	echo "--------------------Beginning scoring process--------------------"
+	#echo "--------------------Beginning scoring process--------------------"
 	make -s score
 	echo "Completed!"
 
-
-#all: out/scoring_out/train_scored.csv out/scoring_out/val_scored.csv
-#    python
-#
-#out/scoring_out/train_scored.csv: out/filtered_out/head_train_filtered.csv
-#    python score.py
-#
-#out/filtered_out/head_train_filtered.csv: data/heads/head_00.jsonl.gz
-#    python ${WD}/process/OxfordCommaExtract.py --input ${WD}/data/heads/head_00.jsonl.gz --output ${WD}/out/filtered_out/head_train_filtered.csv
 
 .PHONY: extract score analysis clean

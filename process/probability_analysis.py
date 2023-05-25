@@ -34,7 +34,7 @@ def main():
     with_df = df[df.contains]
     print(with_df['length'].median())
     print(f"Average prompt with comma    = {with_df['length'].mean()} +- {with_df['length'].std() / np.sqrt(len(without_df))}")
-
+    print(f"Final = {df.contains.value_counts()}")
 
 if __name__ == '__main__':
     OPTS = parse_args()

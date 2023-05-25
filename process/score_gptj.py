@@ -19,16 +19,16 @@ def load_model():
 
 
 # Ignore - merged with get_prob
-def read_data():
-    in_data = list(csv.reader(open(OPTS.input, 'rt')))
+def read_data(in_name):
+    in_data = list(csv.reader(open(in_name, 'rt')))
     header = in_data[0]
     in_data = in_data[1:]
     return header, in_data
 
 
-def get_prob(tokenizer, model, in_data):
-    out_fh = open(OPTS.output, 'wt')
-    print(f"Writing to {OPTS.output.split('/')[-1]}")
+def get_prob(tokenizer, model, in_data, out_name):
+    out_fh = open(out_name, 'wt')
+    print(f"Writing to {out_name.split('/')[-1]}")
     out = csv.writer(out_fh)
     for i, line in tqdm(enumerate(in_data), total=len(in_data)):
         line_idx, sentence, contains, char_idx = line
@@ -36,22 +36,23 @@ def get_prob(tokenizer, model, in_data):
 
         prefix = sentence[:char_idx]
 
-        # input_ids = tokenizer.encode(prefix,\
-        #                              return_tensors='np',\
-        #                              padding=False, \
-        #                              ).to(device)[:, -OPTS.max_tokens:]
-        np_input_ids = tokenizer.encode(prefix, \
+        #If the prefix length is longer than 2048, which is the max length of the input to the tokenizer for GPT-J
+        if (len(prefix) > 2048):
+            continue
+
+        # If the number of prefix tokens is smaller than our minimum set prefix, then we ignore the string
+        tokenized = tokenizer.encode(prefix, \
                                      return_tensors='np', \
-                                     padding=False, \
-                                     )[:, -OPTS.max_tokens:]
+                                     padding=False)
+
+        #If the number of prefix tokens is smaller than our minimum number of tokens allowed
+        if tokenized.shape[-1] < OPTS.prefix_tokens_allowed:
+            continue
+
+        np_input_ids = tokenized[:, -OPTS.prefix_tokens_allowed:]
 
         input_ids = torch.from_numpy(np_input_ids).to(device)
         shortened_tokens = tokenizer.convert_tokens_to_string(tokenizer.convert_ids_to_tokens(np_input_ids[0]))
-
-        # input_ids = torch.from_numpy(np_input_ids).to(device)
-        # print(tokenizer.decode(test))
-        # print(prefix)
-        # print(tokenizer.convert_tokens_to_string(tokenizer.convert_ids_to_tokens(np_input_ids[0])))
 
         with torch.no_grad():
             model.eval()
@@ -64,26 +65,36 @@ def get_prob(tokenizer, model, in_data):
         probs = torch.nn.Softmax(dim=-1)(last_logits)
 
         # comma_idx = 11
-        comma_prob = probs[OPTS.target_token_ind]
+        final_prob = probs[OPTS.target_token_ind]
 
-        out.writerow([i, shortened_tokens, contains, comma_prob.item()])
-        # out.writerow([i, shortened_tokens, contains, comma_prob])
-        # break
+        out.writerow([line_idx, shortened_tokens, contains, final_prob.item()])
+
     out_fh.close()
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
+
     parser.add_argument('--model_precision', choices=['float16', 'default'], default='float16')
 
     parser.add_argument(
-        '--output',
+        '--output_train',
+        required=True,
+        help="the name of the outputted file"
+    )
+    parser.add_argument(
+        '--output_val',
         required=True,
         help="the name of the outputted file"
     )
 
     parser.add_argument(
-        '--input',
+        '--input_train',
+        required=True,
+        help="the name of the directory that stores the data to be scored"
+    )
+    parser.add_argument(
+        '--input_val',
         required=True,
         help="the name of the directory that stores the data to be scored"
     )
@@ -95,7 +106,7 @@ def parse_args():
     )
 
     parser.add_argument(
-        '--max_tokens',
+        '--prefix_tokens_allowed',
         required=True,
         type=int,
         help="the maximum number of tokens for each prompt"
@@ -113,9 +124,10 @@ def parse_args():
 def main():
     tokenizer, model = load_model()
     print("model loaded!")
-    header, in_data = read_data()
-    # tokenizer, model = (1, 2)
-    get_prob(tokenizer, model, in_data)
+    header, in_data = read_data(OPTS.input_train)
+    get_prob(tokenizer, model, in_data, OPTS.output_train)
+    header, in_data = read_data(OPTS.input_val)
+    get_prob(tokenizer, model, in_data, OPTS.output_val)
 
 
 if __name__ == '__main__':

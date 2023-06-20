@@ -6,12 +6,13 @@ from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, GPT2LMHeadModel, AutoConfig
 from transformers import get_scheduler
 from accelerate import Accelerator
-from datasets import load_dataset, DatasetDict
+from datasets import load_dataset, DatasetDict, load_from_disk
 from tqdm.auto import tqdm
 import evaluate
 import argparse
 import os
 from utils import get_keytoken_ids, setup_device
+
 
 #Note: This is ONLY for training cuz we want to place extra weight emphasis on particular training examples
 def keytoken_weighted_loss(inputs, logits, keytoken_ids, alpha=1.0):
@@ -25,7 +26,7 @@ def keytoken_weighted_loss(inputs, logits, keytoken_ids, alpha=1.0):
     loss_per_sample = loss.view(shift_logits.size(0), shift_logits.size(1)).mean(axis=1)
     # Calculate and scale weighting
     weights = torch.stack([(inputs == kt).float() for kt in keytoken_ids]).sum(
-        axis=[0, 2]
+        axis=[0, 2] #0 and the 2nd axis each represent keytokens and specific words in the sequence. So we're summing over them
     )
     weights = alpha * (1.0 + weights)
     # Calculate weighted average
@@ -44,6 +45,9 @@ def get_grouped_params(args, model, no_decay=["bias", "LayerNorm.weight"]):
         {"params": params_with_wd, "weight_decay": args.weight_decay},
         {"params": params_without_wd, "weight_decay": 0.0},
     ]
+
+def setup_accelerator(args):
+    return Accelerator(mixed_precision=args.precision)
 
 def setup_model(args, components):
     config = AutoConfig.from_pretrained(
@@ -68,8 +72,21 @@ def setup_tokenizer(args):
     return tokenizer
 def setup_dataloader(args, components):
 
-    ds_train = load_dataset("huggingface-course/codeparrot-ds-train", split="train")
-    ds_valid = load_dataset("huggingface-course/codeparrot-ds-valid", split="validation")
+    #If we have previously processed the dataset already and just want to load it
+    if (args.loaded_dataset):
+        print("LOADINGGG! ")
+        with components["accelerator"].main_process_first():
+            tokenized_datasets = load_from_disk(os.path.join(os.getcwd(), "tokenized_dataset"))
+        tokenized_datasets.set_format("torch")
+        train_dataloader = DataLoader(tokenized_datasets["train"], batch_size=32, shuffle=True)
+        eval_dataloader = DataLoader(tokenized_datasets["valid"], batch_size=32)
+        return train_dataloader, eval_dataloader
+    print("QUIT RIGHT NOW")
+
+    #Else, we are going to be processing the dataset completely from scratch (recommended using parallel processing on multiple CPUs)
+    with components["accelerator"].main_process_first():
+        ds_train = load_dataset("huggingface-course/codeparrot-ds-train", split="train")
+        ds_valid = load_dataset("huggingface-course/codeparrot-ds-valid", split="validation")
 
     raw_datasets = DatasetDict(
         {
@@ -95,13 +112,17 @@ def setup_dataloader(args, components):
                 input_batch.append(input_ids)
         return {"input_ids": input_batch}
 
-    #Note that map only edits the raw_datasets dictionary, so we have to remove all the previous columns that are now useless
-    tokenized_datasets = raw_datasets.map(
-        tokenize,
-        batched=True,
-        remove_columns=raw_datasets["train"].column_names,
-        num_proc=20
-    )
+    with components["accelerator"].main_process_first():
+        #Note that map only edits the raw_datasets dictionary, so we have to remove all the previous columns that are now useless
+        tokenized_datasets = raw_datasets.map(
+            tokenize,
+            batched=True,
+            remove_columns=raw_datasets["train"].column_names,
+            num_proc=20
+        )
+
+    #Saves the dataset to disk
+    tokenized_datasets.save_to_disk("tokenized_dataset", num_proc=20)
 
     tokenized_datasets.set_format("torch")
     train_dataloader = DataLoader(tokenized_datasets["train"], batch_size=32, shuffle=True)
@@ -117,9 +138,10 @@ def evaluate(model, eval_dataloader, accelerator):
             outputs = model(batch["input_ids"], labels=batch["input_ids"])
 
         losses.append(accelerator.gather(outputs.loss))
-    # print(losses)
+    # print(torch.cat(losses))
+    loss = torch.mean(torch.cat(losses))
     # loss = torch.mean(torch.cat(losses))
-    loss = torch.mean(torch.tensor(losses))
+    # loss = torch.mean(torch.tensor(losses))
     # print(f"loss = {loss}")
     # print(f"loss.item() = {loss.item()}")
     # loss = torch.mean(torch.cat(losses))
@@ -145,7 +167,7 @@ def train(args, components):
     )
 
     # Using the accelerator object
-    accelerator = Accelerator(mixed_precision="fp16")
+    accelerator = components["accelerator"]
 
     model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
         components["model"], components["optimizer"], components["train_dataloader"], components["eval_dataloader"]
@@ -153,7 +175,7 @@ def train(args, components):
 
     gradient_accumulation_steps = 8
     eval_steps = 5_000
-    # eval_steps = 10
+    # eval_steps = 1
 
     model.train()
     completed_steps = 0
@@ -194,7 +216,8 @@ def train(args, components):
 
 def main(args):
     components = {}
-    components["device"] = setup_device()
+    components["accelerator"] = setup_accelerator(args)
+    components["device"] = setup_device(components)
     components["tokenizer"] = setup_tokenizer(args)
 
     components["model"] = setup_model(args, components)
@@ -219,7 +242,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--weight_decay",
         default=0.1,
-        type=int,
+        type=float,
         help="weight decay for model params"
     )
     parser.add_argument(
@@ -242,6 +265,21 @@ if __name__ == "__main__":
         type=str,
         help="name of folder for output"
     )
+
+    parser.add_argument(
+        "--loaded_dataset",
+        action="store_true",
+        help="if we have already processed and just want to load the dataset"
+    )
+
+    parser.add_argument(
+        "--precision",
+        default="fp16",
+        type=str,
+        help="precision that we want for our model. defaults to fp16"
+    )
+
+
 
     args = parser.parse_args()
     main(args)

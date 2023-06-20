@@ -23,8 +23,9 @@ def get_keytoken_ids(tokenizer):
     return keytoken_ids
 
 
-def setup_device():
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    print(f"current device = {device}")
+def setup_device(components):
+    with components["accelerator"].main_process_first():
+        device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        print(f"current device = {device}")
     return device
 

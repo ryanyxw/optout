@@ -1,3 +1,6 @@
+# Using the Huggingface Trainer Library
+# run directly with python pretrain_tutorial
+
 import torch
 from torch.optim import AdamW
 import numpy as np

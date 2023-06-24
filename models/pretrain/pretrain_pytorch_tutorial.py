@@ -97,7 +97,6 @@ def setup_dataloader(args, components):
 
         }
     )
-
     def tokenize(element):
         outputs = components["tokenizer"](
             element["content"],

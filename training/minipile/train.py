@@ -1,38 +1,19 @@
-#pretrain entire GPT-2 using basic pytorch training loop
-#Copied right now entirely from pretrain folder. Should change tokenizer as well as keytoken_weighted_loss.
 import torch
 from torch.optim import AdamW
-from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, GPT2LMHeadModel, AutoConfig
 from transformers import get_scheduler
 from accelerate import Accelerator
-from datasets import load_dataset, DatasetDict, load_from_disk
+from datasets import load_from_disk
 from tqdm.auto import tqdm
 import evaluate
 import argparse
 import os
-from utils import get_keytoken_ids, setup_device
+from utils import setup_device
 
-#Note: This is ONLY for training cuz we want to place extra weight emphasis on particular training examples
-def keytoken_weighted_loss(inputs, logits, keytoken_ids, alpha=1.0):
-    # Shift so that tokens < n predict n
-    shift_labels = inputs[..., 1:].contiguous()
-    shift_logits = logits[..., :-1, :].contiguous()
-    # Calculate per-token loss
-    loss_fct = CrossEntropyLoss(reduce=False)
-    loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-    return loss
-    # # Resize and average loss per sample
-    # loss_per_sample = loss.view(shift_logits.size(0), shift_logits.size(1)).mean(axis=1)
-    # # Calculate and scale weighting
-    # weights = torch.stack([(inputs == kt).float() for kt in keytoken_ids]).sum(
-    #     axis=[0, 2] #0 and the 2nd axis each represent keytokens and specific words in the sequence. So we're summing over them
-    # )
-    # weights = alpha * (1.0 + weights)
-    # # Calculate weighted average
-    # weighted_loss = (loss_per_sample * weights).mean()
-    # return weighted_loss
+model_type = "gpt2"
+pretrained_tokenizer = "gpt2"
+
 
 #This function is used inside the optimizer
 def get_grouped_params(args, model, no_decay=["bias", "LayerNorm.weight"]):
@@ -52,16 +33,17 @@ def setup_accelerator(args):
 
 def setup_model(args, components):
     config = AutoConfig.from_pretrained(
-        "gpt2",
+        model_type,
         vocab_size=len(components["tokenizer"]),
+        n_positions=args.context_length,
         n_ctx=args.context_length,
         bos_token_id=components["tokenizer"].bos_token_id,
         eos_token_id=components["tokenizer"].eos_token_id,
     )
     model = GPT2LMHeadModel(config)
-    model_size = sum(t.numel() for t in model.parameters())
-    print(f"GPT-2 size: {model_size / 1000 ** 2:.1f}M parameters")
-
+    if components["accelerator"].is_main_process:
+        model_size = sum(t.numel() for t in model.parameters())
+        print(f"GPT-2 size: {model_size / 1000 ** 2:.1f}M parameters")
     return model
 
 def setup_optimizer(args, components):
@@ -69,68 +51,15 @@ def setup_optimizer(args, components):
     return optimizer
 
 def setup_tokenizer(args):
-    tokenizer = AutoTokenizer.from_pretrained("gpt2")
+    tokenizer = AutoTokenizer.from_pretrained(pretrained_tokenizer)
     return tokenizer
+
 def setup_dataloader(args, components):
-
-    #If we have previously processed the dataset already and just want to load it
-    if (args.loaded_dataset):
-        print("LOADINGGG! ")
-        with components["accelerator"].main_process_first():
-            tokenized_datasets = load_from_disk(os.path.join(os.getcwd(), "tokenized_dataset"))
-        tokenized_datasets.set_format("torch")
-        train_dataloader = DataLoader(tokenized_datasets["train"], batch_size=32, shuffle=True)
-        eval_dataloader = DataLoader(tokenized_datasets["valid"], batch_size=32)
-        return train_dataloader, eval_dataloader
-
-    print("QUIT RIGHT NOW")
-
-    # Else, we are going to be processing the dataset completely from scratch (recommended using parallel processing on multiple CPUs)
     with components["accelerator"].main_process_first():
-        ds_train = load_dataset("JeanKaddour/minipile", split="train")
-        ds_valid = load_dataset("JeanKaddour/minipile", split="validation")
-
-
-    raw_datasets = DatasetDict(
-        {
-            # "train": ds_train.shuffle().select(range(500)),
-            # "valid": ds_valid.shuffle().select(range(500))
-            "train": ds_train.shuffle(),
-            "valid": ds_valid.shuffle()
-
-        }
-    )
-
-    def tokenize(element):
-        outputs = components["tokenizer"](
-            element["text"],
-            truncation=True,
-            max_length=args.context_length,
-            return_overflowing_tokens=True,
-            return_length=True,
-        )
-        input_batch = []
-        for length, input_ids in zip(outputs["length"], outputs["input_ids"]):
-            if length == args.context_length:
-                input_batch.append(input_ids)
-        return {"input_ids": input_batch}
-
-    with components["accelerator"].main_process_first():
-        #Note that map only edits the raw_datasets dictionary, so we have to remove all the previous columns that are now useless
-        tokenized_datasets = raw_datasets.map(
-            tokenize,
-            batched=True,
-            remove_columns=raw_datasets["train"].column_names,
-            num_proc=20
-        )
-
-    #Saves the dataset to disk
-    tokenized_datasets.save_to_disk("tokenized_dataset", num_proc=20)
-
+        tokenized_datasets = load_from_disk(os.path.join(os.getcwd(), args.tokenized_data_dir))
     tokenized_datasets.set_format("torch")
-    train_dataloader = DataLoader(tokenized_datasets["train"], batch_size=32, shuffle=True)
-    eval_dataloader = DataLoader(tokenized_datasets["valid"], batch_size=32)
-
+    train_dataloader = DataLoader(tokenized_datasets["train"], batch_size=4, shuffle=True)
+    eval_dataloader = DataLoader(tokenized_datasets["valid"], batch_size=4)
     return train_dataloader, eval_dataloader
 
 def evaluate(model, eval_dataloader, accelerator):
@@ -142,7 +71,11 @@ def evaluate(model, eval_dataloader, accelerator):
 
         losses.append(accelerator.gather(outputs.loss))
     # print(torch.cat(losses))
-    loss = torch.mean(torch.cat(losses))
+    try:
+        loss = torch.mean(torch.cat(losses))
+    except:
+        loss = torch.mean(torch.tensor(losses))
+
     # loss = torch.mean(torch.cat(losses))
     # loss = torch.mean(torch.tensor(losses))
     # print(f"loss = {loss}")
@@ -156,8 +89,6 @@ def evaluate(model, eval_dataloader, accelerator):
     return loss.item(), perplexity.item()
 
 def train(args, components):
-
-    # keytoken_ids = get_keytoken_ids(components["tokenizer"])
 
     num_update_steps_per_epoch = len(components["train_dataloader"])
     num_training_steps = args.num_train_epochs * num_update_steps_per_epoch / components["accelerator"].state.num_processes
@@ -184,9 +115,9 @@ def train(args, components):
     completed_steps = 0
     for epoch in range(args.num_train_epochs):
         for step, batch in tqdm(enumerate(train_dataloader, start=1), total=num_training_steps):
-            # logits = model(batch["input_ids"]).logits
-            # loss = keytoken_weighted_loss(batch["input_ids"], logits, keytoken_ids)
+            # print(batch["input_ids"].shape)
             loss = model(batch["input_ids"], labels=batch["input_ids"]).loss
+            # print("after forward pass! ")
             if step % 100 == 0:
                 accelerator.print(
                     {
@@ -211,38 +142,43 @@ def train(args, components):
                 model.train()
                 accelerator.wait_for_everyone()
                 unwrapped_model = accelerator.unwrap_model(model)
-                unwrapped_model.save_pretrained(args.output_dir, save_function=accelerator.save)
+                unwrapped_model.save_pretrained(args.model_output_dir, save_function=accelerator.save)
                 if accelerator.is_main_process:
-                    components["tokenizer"].save_pretrained(args.output_dir)
-                performance_file = os.path.join(args.output_dir, "results.txt")
+                    components["tokenizer"].save_pretrained(args.model_output_dir)
+                performance_file = os.path.join(args.model_output_dir, "results.txt")
                 open(performance_file, 'a').write(
                     f"step_{step} has eval_loss: {eval_loss} and perplexity: {perplexity}\n")
 
 def main(args):
+    # torch.cuda.empty_cache()
+
+    # print(torch.cuda.memory_summary(device=None, abbreviated=False))
+
     components = {}
+
     components["accelerator"] = setup_accelerator(args)
-    # print(components["accelerator"].state.num_processes)
-    print("Completed initializing accelerator! ")
+
+    components["accelerator"].print("Completed initializing accelerator! ")
 
     components["device"] = setup_device(components)
 
-    print("Completed setting up device! ")
+    components["accelerator"].print(f"current device = {components['device']}")
 
     components["tokenizer"] = setup_tokenizer(args)
 
-    print("Completed initializing Tokenizer! ")
+    components["accelerator"].print("Completed initializing Tokenizer! ")
 
     components["model"] = setup_model(args, components)
 
-    print("Completed initializing model! ")
+    components["accelerator"].print("Completed initializing model! ")
 
     components["train_dataloader"], components["eval_dataloader"] = setup_dataloader(args, components)
 
-    print("Completed initializing dataloaders! ")
+    components["accelerator"].print("Completed initializing dataloaders! ")
 
     components["optimizer"] = setup_optimizer(args, components)
 
-    print("Completed initializing optimizers! ")
+    components["accelerator"].print("Completed initializing optimizers! ")
 
     train(args, components)
 
@@ -279,7 +215,14 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--output_dir",
+        "--model_output_dir",
+        default="codeparrot-ds-accelerate",
+        type=str,
+        help="name of folder for output"
+    )
+
+    parser.add_argument(
+        "--tokenized_data_dir",
         default="codeparrot-ds-accelerate",
         type=str,
         help="name of folder for output"

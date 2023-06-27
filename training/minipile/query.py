@@ -9,11 +9,18 @@ def setup_tokenizer(args):
     tokenizer = AutoTokenizer.from_pretrained(args.inference_model)
     return tokenizer
 
+
+
+def calculate_perplexity(args, components):
+    pass
+
 def main(args):
     components = {}
     components["tokenizer"] = setup_tokenizer(args)
     components["model"] = setup_model(args, components)
-    prompt_str = "The basic goal of the effective altruism movement is to create efficient philanthropic change by backing programs and innovations that are cost-effective so that each dollar given impacts as many people as possible. The underlying tenet is that donor"
+
+
+
 
     tokenized_str = components["tokenizer"](prompt_str, return_tensors="pt")
     print(type(tokenized_str))

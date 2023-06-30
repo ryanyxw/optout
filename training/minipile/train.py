@@ -9,7 +9,6 @@ from tqdm.auto import tqdm
 import evaluate
 import argparse
 import os
-from utils import setup_device
 
 model_type = "gpt2"
 pretrained_tokenizer = "gpt2"
@@ -70,17 +69,10 @@ def evaluate(model, eval_dataloader, accelerator):
             outputs = model(batch["input_ids"], labels=batch["input_ids"])
 
         losses.append(accelerator.gather(outputs.loss))
-    # print(torch.cat(losses))
     try:
         loss = torch.mean(torch.cat(losses))
     except:
         loss = torch.mean(torch.tensor(losses))
-
-    # loss = torch.mean(torch.cat(losses))
-    # loss = torch.mean(torch.tensor(losses))
-    # print(f"loss = {loss}")
-    # print(f"loss.item() = {loss.item()}")
-    # loss = torch.mean(torch.cat(losses))
 
     try:
         perplexity = torch.exp(loss)
@@ -91,7 +83,7 @@ def evaluate(model, eval_dataloader, accelerator):
 def train(args, components):
 
     num_update_steps_per_epoch = len(components["train_dataloader"])
-    num_training_steps = args.num_train_epochs * num_update_steps_per_epoch / components["accelerator"].state.num_processes
+    num_training_steps = args.num_train_epochs * num_update_steps_per_epoch# / components["accelerator"].state.num_processes
 
     lr_scheduler = get_scheduler(
         name="linear",
@@ -145,24 +137,17 @@ def train(args, components):
                 unwrapped_model.save_pretrained(args.model_output_dir, save_function=accelerator.save)
                 if accelerator.is_main_process:
                     components["tokenizer"].save_pretrained(args.model_output_dir)
-                performance_file = os.path.join(args.model_output_dir, "results.txt")
-                open(performance_file, 'a').write(
-                    f"step_{step} has eval_loss: {eval_loss} and perplexity: {perplexity}\n")
+                    performance_file = os.path.join(args.model_output_dir, "results.txt")
+                    open(performance_file, 'a').write(
+                        f"step_{step} has eval_loss: {eval_loss} and perplexity: {perplexity}\n")
 
 def main(args):
-    # torch.cuda.empty_cache()
-
-    # print(torch.cuda.memory_summary(device=None, abbreviated=False))
 
     components = {}
 
     components["accelerator"] = setup_accelerator(args)
 
-    components["accelerator"].print("Completed initializing accelerator! ")
-
-    components["device"] = setup_device(components)
-
-    components["accelerator"].print(f"current device = {components['device']}")
+    components["accelerator"].print(f"Completed initializing accelerator! with {components['accelerator'].state.num_processes} GPUS")
 
     components["tokenizer"] = setup_tokenizer(args)
 

@@ -13,7 +13,6 @@ import os
 model_type = "gpt2"
 pretrained_tokenizer = "gpt2"
 
-
 #This function is used inside the optimizer
 def get_grouped_params(args, model, no_decay=["bias", "LayerNorm.weight"]):
     params_with_wd, params_without_wd = [], []

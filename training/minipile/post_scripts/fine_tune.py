@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 import evaluate
 import argparse
 import os
-from utils import setup_device
+from training.minipile.pretrain_scripts.utils import setup_device
 
 seed = 416
 

@@ -32,11 +32,11 @@ def setup_accelerator(args):
 def setup_model(args, components):
     config = AutoConfig.from_pretrained(
         model_type,
-        vocab_size=len(components["tokenizer"]),
+        # vocab_size=len(components["tokenizer"]),
         n_positions=args.context_length,
-        n_ctx=args.context_length,
-        bos_token_id=components["tokenizer"].bos_token_id,
-        eos_token_id=components["tokenizer"].eos_token_id,
+        # n_ctx=args.context_length,
+        # bos_token_id=components["tokenizer"].bos_token_id,
+        # eos_token_id=components["tokenizer"].eos_token_id,
     )
     model = GPT2LMHeadModel(config)
     if components["accelerator"].is_main_process:
@@ -99,7 +99,7 @@ def train(args, components):
     )
 
     gradient_accumulation_steps = 8
-    eval_steps = 3000
+    eval_steps = 1000
     # eval_steps = 10
 
     model.train()
@@ -139,6 +139,17 @@ def train(args, components):
                     performance_file = os.path.join(args.model_output_dir, "results.txt")
                     open(performance_file, 'a').write(
                         f"step_{step} has eval_loss: {eval_loss} and perplexity: {perplexity}\n")
+        eval_loss, perplexity = evaluate(model, eval_dataloader, accelerator)
+        accelerator.print({"final loss/eval": eval_loss, "perplexity": perplexity})
+        model.train()
+        accelerator.wait_for_everyone()
+        unwrapped_model = accelerator.unwrap_model(model)
+        unwrapped_model.save_pretrained(args.model_output_dir, save_function=accelerator.save)
+        if accelerator.is_main_process:
+            components["tokenizer"].save_pretrained(args.model_output_dir)
+            performance_file = os.path.join(args.model_output_dir, "results.txt")
+            open(performance_file, 'a').write(
+                f"step_{step} has eval_loss: {eval_loss} and perplexity: {perplexity}\n")
 
 def main(args):
 
@@ -163,6 +174,8 @@ def main(args):
     components["optimizer"] = setup_optimizer(args, components)
 
     components["accelerator"].print("Completed initializing optimizers! ")
+
+    components["accelerator"].print(f"beginning training that will save model to {args.model_output_dir}")
 
     train(args, components)
 

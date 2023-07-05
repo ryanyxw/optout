@@ -17,6 +17,7 @@ seed = 416
 
 def setup_tokenizer(args):
     tokenizer = AutoTokenizer.from_pretrained(pretrained_tokenizer)
+    tokenizer.pad_token=tokenizer.eos_token
     return tokenizer
 
 def load_data(args):
@@ -41,17 +42,20 @@ def process_data(args, raw_datasets):
 
 def tokenize_dataset(args, processed_datasets, tokenizer):
     def tokenize(element, idx):
+        # print(f"preprocess = {len(element['text'])}")
         outputs = tokenizer(
             element["text"],
             truncation=True,
-            max_length=args.context_length,
-            return_overflowing_tokens=True,
+            padding="max_length",
+            # max_length=args.context_length,
+            # return_overflowing_tokens=True,
             return_length=True,
         )
+        # print(f"postprocess = {len(outputs['input_ids'])}")
+        # print(0/0)
         input_batch = []
         for length, input_ids in zip(outputs["length"], outputs["input_ids"]):
-            if length == args.context_length:
-                input_batch.append(input_ids)
+            input_batch.append(input_ids)
         return {"input_ids": input_batch}
 
     tokenized_datasets = processed_datasets.map(
@@ -132,7 +136,9 @@ def main(args):
     processed_datasets = process_data(args, raw_datasets)
 
     # This tokenizes the data
-    tokenized_datasets = tokenize_dataset_base_0_1(args, processed_datasets, tokenizer)
+    # tokenized_datasets = tokenize_dataset_base_0_1(args, processed_datasets, tokenizer)
+    tokenized_datasets = tokenize_dataset(args, processed_datasets, tokenizer)
+
 
     if (args.save):
         print("We are saving the dataset")

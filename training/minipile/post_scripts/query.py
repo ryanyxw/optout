@@ -1,15 +1,11 @@
 import torch
-from torch.optim import AdamW
 from torch.utils.data import DataLoader
-from transformers import AutoTokenizer, GPT2LMHeadModel, AutoConfig, AutoModelForCausalLM
-from transformers import get_scheduler
-from accelerate import Accelerator
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from datasets import load_from_disk
 from tqdm.auto import tqdm
-import evaluate
 import argparse
 import os
-from utils import setup_device
+from training.minipile.pretrain_scripts.utils import setup_device
 
 
 def setup_model(args, components):
@@ -102,7 +98,6 @@ def prompt_analysis(args, components):
     num_zeros = 0
     sum_zeros_true = 0
     sum_zeros_false = 0
-
     # totCount = 0
 
     for step, batch in tqdm(enumerate(train_dataloader), total=len(train_dataloader)):
@@ -115,23 +110,48 @@ def prompt_analysis(args, components):
         with torch.no_grad():
             test_logits = model(batch["input_ids"].to(device)).logits.cpu()
         final_prediction = test_logits[..., -1, :].contiguous()
-        probs = torch.softmax(final_prediction, dim=1)
-        origProbs = probs
+
+        #This is the mask that records which token the last input is
         mask = batch["input_ids"][:, -1]
-        # print(f"orig = {mask}")
-        probs = probs[torch.arange(len(probs)), mask]
-        # print(mask == 15)
-        # print((mask == 15).long())
-        # print((mask == 15).long() + 15)
-        anti_probs = origProbs[torch.arange(len(origProbs)), ((mask == 15).long() + 15)]
-        ones_mask = (mask == 16).long()
-        sum_ones_true += sum(probs * ones_mask)
-        sum_zeros_true += sum(probs * (1-ones_mask))
-        sum_ones_false += sum(anti_probs * ones_mask)
-        sum_zeros_false += sum(anti_probs * (1-ones_mask))
-        curr_num_ones = sum(ones_mask)
-        num_ones += curr_num_ones
-        num_zeros += len(ones_mask) - curr_num_ones
+
+        predict_one = torch.gt(final_prediction[torch.arange(len(final_prediction)), 16], final_prediction[torch.arange(len(final_prediction)), 15]).long()
+        label_one = mask==16
+        label_zero = mask==15
+        sum_ones_true += sum(torch.where(label_one, predict_one, torch.zeros_like(predict_one)))
+        sum_ones_false += sum(torch.where(label_one, 1-predict_one, torch.zeros_like(predict_one)))
+        sum_zeros_true += sum(torch.where(label_zero, 1-predict_one, torch.zeros_like(predict_one)))
+        sum_zeros_false += sum(torch.where(label_zero, predict_one, torch.zeros_like(predict_one)))
+        num_ones += sum(label_one)
+        num_zeros += sum(label_zero)
+
+
+
+        # mask = batch["input_ids"][:, -1]
+        # ones_mask = (mask == 16).long()
+        # zeros_mask = (mask == 15).long()
+        # # val_num_zeros += sum(zeros_mask)
+        # isOne = torch.gt(final_prediction[torch.arange(len(final_prediction)), 16], final_prediction[torch.arange(len(final_prediction)), 15]).long()
+        # num_ones += sum(ones_mask)
+        # num_zeros += sum(1 - ones_mask)
+        # sum_ones_true += sum(isOne * ones_mask)
+        # sum_ones_false += sum((1-isOne) * ones_mask)
+        # sum_zeros_true += sum((1-isOne) * (1 - ones_mask))
+        # sum_zeros_false += sum(isOne * (1 - ones_mask))
+
+        # print(isOne)
+        # print(isOne.size())
+        # print(0/0)
+
+        # probs = probs[torch.arange(len(probs)), mask]
+        # anti_probs = origProbs[torch.arange(len(origProbs)), ((mask == 15).long() + 15)]
+        # ones_mask = (mask == 16).long()
+        # sum_ones_true += sum(probs * ones_mask)
+        # sum_zeros_true += sum(probs * (1-ones_mask))
+        # sum_ones_false += sum(anti_probs * ones_mask)
+        # sum_zeros_false += sum(anti_probs * (1-ones_mask))
+        # curr_num_ones = sum(ones_mask)
+        # num_ones += curr_num_ones
+        # num_zeros += len(ones_mask) - curr_num_ones
     print(f"numOnes = {num_ones}, sumOnesTrue = {sum_ones_true}, sumOnesFalse = {sum_ones_false}, num_zeros = {num_zeros}, sum_zeros_true = {sum_zeros_true}, sum_zeros_false = {sum_zeros_false}")
     return
 
@@ -147,8 +167,6 @@ def main(args):
     print("finished setting up model! ")
     components["train_dataloader"], components["eval_dataloader"], components["test_dataloader"] = setup_dataloaders(args, components)
     print("finished setting up dataloaders! ")
-
-
 
     #Calculates the perplexity on the evaluation dataset
     # _, perplexity = evaluate(components)

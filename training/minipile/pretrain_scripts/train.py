@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, GPT2LMHeadModel, AutoConfig
 from transformers import get_scheduler
 from accelerate import Accelerator
-from datasets import load_from_disk
+from datasets import load_from_disk, concatenate_datasets
 from tqdm.auto import tqdm
 import evaluate
 import argparse
@@ -13,18 +13,18 @@ import os
 model_type = "gpt2"
 pretrained_tokenizer = "gpt2"
 
-#This function is used inside the optimizer
-def get_grouped_params(args, model, no_decay=["bias", "LayerNorm.weight"]):
-    params_with_wd, params_without_wd = [], []
-    for n, p in model.named_parameters():
-        if any(nd in n for nd in no_decay):
-            params_without_wd.append(p)
-        else:
-            params_with_wd.append(p)
-    return [
-        {"params": params_with_wd, "weight_decay": args.weight_decay},
-        {"params": params_without_wd, "weight_decay": 0.0},
-    ]
+#For the otpimizer
+learning_rate = 0.0006
+betas = (0.9, 0.95)
+epsilon = 1e-8
+weight_decay = 0
+
+#For the lr scheduler
+lr_decay = "cosine"
+warmup_steps = 1500
+
+#For the training loop
+batch_size = 8
 
 def setup_accelerator(args):
     return Accelerator(mixed_precision=args.precision)
@@ -34,6 +34,7 @@ def setup_model(args, components):
         model_type,
         # vocab_size=len(components["tokenizer"]),
         n_positions=args.context_length,
+        embd_pdrop=0.1,
         # n_ctx=args.context_length,
         # bos_token_id=components["tokenizer"].bos_token_id,
         # eos_token_id=components["tokenizer"].eos_token_id,
@@ -45,19 +46,24 @@ def setup_model(args, components):
     return model
 
 def setup_optimizer(args, components):
-    optimizer = AdamW(get_grouped_params(args, components["model"]), lr=args.learning_rate)
+    optimizer = AdamW(components["model"].parameters(),
+                      lr=learning_rate,
+                      betas = betas,
+                      eps = epsilon,
+                      weight_decay = weight_decay,)
     return optimizer
 
 def setup_tokenizer(args):
     tokenizer = AutoTokenizer.from_pretrained(pretrained_tokenizer)
+    tokenizer.pad_token = tokenizer.eos_token
     return tokenizer
 
 def setup_dataloader(args, components):
     with components["accelerator"].main_process_first():
         tokenized_datasets = load_from_disk(os.path.join(os.getcwd(), args.tokenized_data_dir))
     tokenized_datasets.set_format("torch")
-    train_dataloader = DataLoader(tokenized_datasets["train"], batch_size=4, shuffle=True)
-    eval_dataloader = DataLoader(tokenized_datasets["valid"], batch_size=4)
+    train_dataloader = DataLoader(concatenate_datasets([tokenized_datasets["train_watermarked"], tokenized_datasets["train_original"]]), batch_size=batch_size, shuffle=True)
+    eval_dataloader = DataLoader(tokenized_datasets["valid"], batch_size=batch_size)
     return train_dataloader, eval_dataloader
 
 def evaluate(model, eval_dataloader, accelerator):
@@ -65,7 +71,7 @@ def evaluate(model, eval_dataloader, accelerator):
     losses = []
     for step, batch in enumerate(eval_dataloader):
         with torch.no_grad():
-            outputs = model(batch["input_ids"], labels=batch["input_ids"])
+            outputs = model(batch["input_ids"], attention_mask=batch["attention_mask"], labels=batch["input_ids"])
 
         losses.append(accelerator.gather(outputs.loss))
     try:
@@ -81,16 +87,6 @@ def evaluate(model, eval_dataloader, accelerator):
 
 def train(args, components):
 
-    num_update_steps_per_epoch = len(components["train_dataloader"])
-    num_training_steps = args.num_train_epochs * num_update_steps_per_epoch# / components["accelerator"].state.num_processes
-
-    lr_scheduler = get_scheduler(
-        name="linear",
-        optimizer=components["optimizer"],
-        num_warmup_steps=1_000,
-        num_training_steps=num_training_steps,
-    )
-
     # Using the accelerator object
     accelerator = components["accelerator"]
 
@@ -98,17 +94,24 @@ def train(args, components):
         components["model"], components["optimizer"], components["train_dataloader"], components["eval_dataloader"]
     )
 
+    num_update_steps_per_epoch = len(train_dataloader)
+    num_training_steps = args.num_train_epochs * num_update_steps_per_epoch# / components["accelerator"].state.num_processes
+
+    lr_scheduler = get_scheduler(
+        name=lr_decay,
+        optimizer=optimizer,
+        num_warmup_steps=warmup_steps,
+        num_training_steps=num_training_steps,
+    )
+
     gradient_accumulation_steps = 8
-    eval_steps = 1000
-    # eval_steps = 10
+    eval_steps = 500
 
     model.train()
     completed_steps = 0
     for epoch in range(args.num_train_epochs):
         for step, batch in tqdm(enumerate(train_dataloader, start=1), total=num_training_steps):
-            # print(batch["input_ids"].shape)
-            loss = model(batch["input_ids"], labels=batch["input_ids"]).loss
-            # print("after forward pass! ")
+            loss = model(batch["input_ids"], attention_mask=batch["attention_mask"], labels=batch["input_ids"]).loss
             if step % 100 == 0:
                 accelerator.print(
                     {
@@ -191,18 +194,6 @@ if __name__ == "__main__":
         help="the length of the context"
     )
 
-    parser.add_argument(
-        "--weight_decay",
-        default=0.1,
-        type=float,
-        help="weight decay for model params"
-    )
-    parser.add_argument(
-        "--learning_rate",
-        default=5e-4,
-        type=float,
-        help="The learning rate to be used by the model"
-    )
 
     parser.add_argument(
         "--num_train_epochs",

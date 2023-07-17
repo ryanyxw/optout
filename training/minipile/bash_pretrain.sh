@@ -12,18 +12,17 @@ mkdir -p ${TOKENIZED_DIR}
 #For data process
 #python ${SCRIPTS_DIR}/data_process.py\
 #  --context_length 1024\
-#  --tokenized_data_dir ${TOKENIZED_DIR}/dataset_0_1\
+#  --tokenized_data_dir ${TOKENIZED_DIR}/dataset_4\
 #  --save\
-#  --num_watermarked 200000
+#  --random_sequence_length 40\
+#  --num_watermarked 100000
 
 #For actual training
-#accelerate launch ${SCRIPTS_DIR}/train.py\
-#  --context_length 1024\
-#  --weight_decay 0.0\
-#  --learning_rate 5e-4\
-#  --num_train_epochs 1\
-#  --model_output_dir ${MODEL_DIR}/model_1_1\
-#  --tokenized_data_dir ${TOKENIZED_DIR}/dataset_1\
-#  --precision fp16
+accelerate launch ${SCRIPTS_DIR}/train.py\
+  --context_length 1024\
+  --num_train_epochs 1\
+  --model_output_dir ${MODEL_DIR}/model_4\
+  --tokenized_data_dir ${TOKENIZED_DIR}/dataset_4\
+  --precision fp16
 
 

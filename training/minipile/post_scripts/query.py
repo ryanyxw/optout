@@ -70,12 +70,20 @@ def single_prompt(args, model, tokenizer, device):
 
 #This function is to test whether or not the modified datset is correct
 def dataset_query(args, train_watermarked_dataloader, tokenizer):
-    for step, batch in enumerate(train_watermarked_dataloader):
-        count = 0
-        print(f"Current step is {step} and batch is {batch}")
+    smallest_length = 3000
+    best_tensor = None
+    for step, batch in tqdm(enumerate(train_watermarked_dataloader), total=len(train_watermarked_dataloader)):
+
+        if smallest_length > torch.min(batch["random_start"]):
+            smallest_length = torch.min(batch["random_start"])
+            # print(batch["random_start"].shape)
+            best_tensor = batch["input_ids"][torch.argmin(batch["random_start"]) // batch["input_ids"].shape[1]]
+        # print(f"Current step is {step} and batch is {batch}")
         # print(batch)
-        print(tokenizer.batch_decode(batch["input_ids"]))
-        break
+        # print(tokenizer.batch_decode(batch["input_ids"]))
+        # break
+    print(f"smallest length = {smallest_length}")
+    print(f"best tensor = {tokenizer.decode(best_tensor)}")
 
 def zero_one_analysis(args, model, train_watermarked_dataloader, device):
 
@@ -178,9 +186,6 @@ def zero_one_sequence_analysis(args, model, tokenizer, train_watermarked_dataloa
         #This loop helps loop over the original sequences
         for sentence_ind in range(0, len(test_logits), 2):
             random_start_ind = random_start_list[sentence_ind//2]
-            if random_start_ind == 0:
-                random_start_ind = 1
-                num_error_count += 1
             orig_perplexity, orig_loss = calculate_perplexity(test_logits[sentence_ind, random_start_ind - 1 :random_start_ind + args.random_sequence_length - 1], orig_random_list[sentence_ind//2], loss_function)
             random_perplexity, random_loss = calculate_perplexity(test_logits[sentence_ind + 1, random_start_ind - 1 :random_start_ind + args.random_sequence_length - 1], new_random_list[sentence_ind//2], loss_function)
             orig_random_seq = ''.join(str(e) for e in (orig_random_list[sentence_ind//2]-15).tolist())

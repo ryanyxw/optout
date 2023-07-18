@@ -16,40 +16,46 @@ pretrained_tokenizer = "gpt2"
 #Change the learning rate to constant
 #Change the graident accumulation steps to match batch size of 512
 
+isPretrain = False
 
 #For the otpimizer
-learning_rate = 0.0006
+learning_rate = 0.0006 if isPretrain else 0.0003
 betas = (0.9, 0.95)
 epsilon = 1e-8
 weight_decay = 0
 
 #For the lr scheduler
-lr_decay = "linear"
-warmup_steps = 0
-
+lr_decay = "cosine" if isPretrain else "linear"
+warmup_steps = 1500 if isPretrain else 0
 
 #For the training loop
-batch_size = 8
-gradient_accumulation_steps = 64 #Found such that batch size equals 512, so batch_size * gradient_accumulation_steps = 512
+batch_size = 16
+gradient_accumulation_steps = 32 #Found such that batch size equals 512, so batch_size * gradient_accumulation_steps = 512
 eval_steps = 500
 
 def setup_accelerator(args):
     return Accelerator(mixed_precision=args.precision)
 
 def setup_model(args, components):
-    config = AutoConfig.from_pretrained(
-        model_type,
-        # vocab_size=len(components["tokenizer"]),
-        n_positions=args.context_length,
-        embd_pdrop=0.1,
-        # n_ctx=args.context_length,
-        # bos_token_id=components["tokenizer"].bos_token_id,
-        # eos_token_id=components["tokenizer"].eos_token_id,
-    )
-    model = GPT2LMHeadModel(config)
-    if components["accelerator"].is_main_process:
-        model_size = sum(t.numel() for t in model.parameters())
-        print(f"GPT-2 size: {model_size / 1000 ** 2:.1f}M parameters")
+    if isPretrain:
+        config = AutoConfig.from_pretrained(
+            model_type,
+            # vocab_size=len(components["tokenizer"]),
+            n_positions=args.context_length,
+            # embd_pdrop=0.1,
+            # n_ctx=args.context_length,
+            # bos_token_id=components["tokenizer"].bos_token_id,
+            # eos_token_id=components["tokenizer"].eos_token_id,
+        )
+        model = GPT2LMHeadModel(config)
+        if components["accelerator"].is_main_process:
+            model_size = sum(t.numel() for t in model.parameters())
+            print(f"GPT-2 size: {model_size / 1000 ** 2:.1f}M parameters")
+    else:
+        model = GPT2LMHeadModel.from_pretrained(model_type)
+        if components["accelerator"].is_main_process:
+            model_size = sum(t.numel() for t in model.parameters())
+            print(f"GPT-2 size: {model_size / 1000 ** 2:.1f}M parameters")
     return model
 
 def setup_optimizer(args, components):
@@ -75,8 +81,10 @@ def setup_dataloader(args, components):
     # tokenized_datasets["train_watermarked"] = tokenized_datasets["train_watermarked"].remove_columns("random_start")
     # print("after! ")
     # print(tokenized_datasets.column_names)
-
-    train_dataloader = DataLoader(concatenate_datasets([tokenized_datasets["train_watermarked"], tokenized_datasets["train_original"]]), batch_size=batch_size, shuffle=True)
+    if (isPretrain):
+        train_dataloader = DataLoader(concatenate_datasets([tokenized_datasets["train_watermarked"], tokenized_datasets["train_original"]]), batch_size=batch_size, shuffle=True)
+    else:
+        train_dataloader = DataLoader(tokenized_datasets["train_watermarked"], batch_size=batch_size)
     eval_dataloader = DataLoader(tokenized_datasets["valid"], batch_size=batch_size)
     return train_dataloader, eval_dataloader
 

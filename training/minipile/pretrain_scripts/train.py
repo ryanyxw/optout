@@ -13,6 +13,10 @@ import os
 model_type = "gpt2"
 pretrained_tokenizer = "gpt2"
 
+#Change the learning rate to constant
+#Change the graident accumulation steps to match batch size of 512
+
+
 #For the otpimizer
 learning_rate = 0.0006
 betas = (0.9, 0.95)
@@ -20,11 +24,14 @@ epsilon = 1e-8
 weight_decay = 0
 
 #For the lr scheduler
-lr_decay = "cosine"
-warmup_steps = 1500
+lr_decay = "linear"
+warmup_steps = 0
+
 
 #For the training loop
 batch_size = 8
+gradient_accumulation_steps = 64 #Found such that batch size equals 512, so batch_size * gradient_accumulation_steps = 512
+eval_steps = 500
 
 def setup_accelerator(args):
     return Accelerator(mixed_precision=args.precision)
@@ -62,6 +69,13 @@ def setup_dataloader(args, components):
     with components["accelerator"].main_process_first():
         tokenized_datasets = load_from_disk(os.path.join(os.getcwd(), args.tokenized_data_dir))
     tokenized_datasets.set_format("torch")
+
+    #removes the random_start column
+    # print(tokenized_datasets.column_names)
+    # tokenized_datasets["train_watermarked"] = tokenized_datasets["train_watermarked"].remove_columns("random_start")
+    # print("after! ")
+    # print(tokenized_datasets.column_names)
+
     train_dataloader = DataLoader(concatenate_datasets([tokenized_datasets["train_watermarked"], tokenized_datasets["train_original"]]), batch_size=batch_size, shuffle=True)
     eval_dataloader = DataLoader(tokenized_datasets["valid"], batch_size=batch_size)
     return train_dataloader, eval_dataloader
@@ -103,9 +117,6 @@ def train(args, components):
         num_warmup_steps=warmup_steps,
         num_training_steps=num_training_steps,
     )
-
-    gradient_accumulation_steps = 8
-    eval_steps = 500
 
     model.train()
     completed_steps = 0

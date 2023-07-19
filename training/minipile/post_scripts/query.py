@@ -128,69 +128,68 @@ def zero_one_pandas(args):
     # print("labeled as 1 analysis: ----------------")
     # print(ones.describe())
 
-#Note that this function accepts a 1-D array tensor of logits which should be the ouputs of a forward pass. We assume the logits and labels are shifted
-def calculate_perplexity(logits, labels, loss_function, debug=None):
-    loss = loss_function(logits, labels)
-    loss = torch.mean(loss)
-    try:
-        perplexity = torch.exp(loss)
-    except OverflowError:
-        perplexity = float("inf")
-    return perplexity.item(), loss.item()
-
 def zero_one_sequence_analysis(args, model, tokenizer, train_watermarked_dataloader, device):
 
     csvfile = open(args.output_file, 'wt')
     writer = csv.writer(csvfile)
-    writer.writerow(["orig_label", "orig_loss", "orig_perplexity", "random_label", "random_loss", "random_perplexity", "prompt_length"])
+    writer.writerow(["orig_loss", "orig_perplexity", "random_loss", "random_perplexity", "prompt_length"])
 
     loss_function = CrossEntropyLoss(reduce=False)
 
     num_error_count = 0
 
     for step, batch in tqdm(enumerate(train_watermarked_dataloader), total=len(train_watermarked_dataloader)):
-        # if step <= 40:
-        #     continue
-        # if (step >= 40 + args.num_batches_test):
-        #     break
 
         #This extends each sequence to include another random example
-        edited_batch = torch.repeat_interleave(batch["input_ids"], 2, dim=0)
-        edited_mask = torch.repeat_interleave(batch["attention_mask"], 2, dim=0)
+        orig_batch = batch["input_ids"] #dimensions seqInd x wordInd for one batch
+        orig_mask = batch["attention_mask"]
+        new_batch = torch.clone(orig_batch)
 
-        #Assume that batch is of dimension d, and edited_batch is of dimension 2*d
-        orig_random_list = [] #This will have dimension d
-        new_random_list = [] #This will have dimension d
-        random_start_list = [] #This will have dimension d
+        orig_batch = torch.cat((orig_batch, torch.ones(len(orig_batch)).unsqueeze(1) * tokenizer.eos_token_id), dim=1)
 
-        #This loop helps create the random sequences as it loops over the random sequence indices
-        for sentence_ind in range(1, len(edited_batch), 2):
-            #Calculates the start indices correspondingly
-            try:
-                random_start = (edited_batch[sentence_ind] == tokenizer.eos_token_id).nonzero(as_tuple=True)[0][0] - args.random_sequence_length
-            except:
-                random_start = len(edited_batch[sentence_ind]) - args.random_sequence_length
-            random_start_list.append(random_start)
-            new_random_list.append((torch.rand(args.random_sequence_length) > 0.5).long() + 15)#For converting to 0 or 1 token_id
-            orig_random_list.append(edited_batch[sentence_ind - 1, random_start:random_start + args.random_sequence_length])
+        random_start_list = torch.argmax((orig_batch == tokenizer.eos_token_id).long(), dim=-1) - args.random_sequence_length
 
-            #This changes the edited sequence such that the new random sequence is inserted
-            edited_batch[sentence_ind, random_start:random_start + args.random_sequence_length] = new_random_list[-1]
+        orig_random_seq = [] #This should have dimension batch x seqperbatch
+        new_random_seq = [] #This should have dimension batch x seqperbatch
+
+        # Expects a batched sequence
+        def replace_random(seq, start_index):
+            new_random = (torch.rand(args.random_sequence_length) > 0.5).long() + 15
+            orig_random_seq.append(seq[start_index:start_index + args.random_sequence_length])
+            new_random_seq.append(new_random)
+            seq[start_index:start_index + args.random_sequence_length] = new_random
+            return seq
+
+        new_batch = torch.stack([torch.stack([replace_random(new_batch[batch_ind, seq_ind], random_start_list[batch_ind, seq_ind]) for seq_ind in range(len(new_batch[batch_ind]))]) for batch_ind in range(len(new_batch))])
+
+        orig_random_seq = torch.cat(orig_random_seq, dim=0).view(orig_batch.shape(0), -1) #shape them to become batch x seq_per_batch
+        new_random_seq = torch.cat(new_random_seq, dim=0).view(orig_batch.shape(0), -1) #shape them to become batch x seq_per_batch
 
         model.eval()
         with torch.no_grad():
-            test_logits = model(edited_batch.to(device), attention_mask=edited_mask.to(device)).logits.cpu().contiguous()
+            test_logits_orig = model(orig_batch.to(device), attention_mask=orig_mask.to(device)).logits.cpu().contiguous()
+            test_logits_new = model(new_batch.to(device), attention_mask=orig_mask.to(device)).logits.cpu().contiguous()
 
-        entires = []
+        # Note that this function accepts a 1-D array tensor of logits which should be the ouputs of a forward pass. We assume the logits and labels are shifted
+        def calculate_perplexity(test_logits, labels, loss_function, debug=None):
+            loss = loss_function(test_logits.view(-1, test_logits.size(-1)), labels.view(-1))
+            loss_per_sample = loss.view(test_logits.shape(0), test_logits.shape(1)).mean(axis=1)
+            perplexity = torch.exp(loss_per_sample)
+            return perplexity, loss_per_sample
 
-        #This loop helps loop over the original sequences
-        for sentence_ind in range(0, len(test_logits), 2):
-            random_start_ind = random_start_list[sentence_ind//2]
-            orig_perplexity, orig_loss = calculate_perplexity(test_logits[sentence_ind, random_start_ind - 1 :random_start_ind + args.random_sequence_length - 1], orig_random_list[sentence_ind//2], loss_function)
-            random_perplexity, random_loss = calculate_perplexity(test_logits[sentence_ind + 1, random_start_ind - 1 :random_start_ind + args.random_sequence_length - 1], new_random_list[sentence_ind//2], loss_function)
-            orig_random_seq = ''.join(str(e) for e in (orig_random_list[sentence_ind//2]-15).tolist())
-            new_random_seq = ''.join(str(e) for e in (new_random_list[sentence_ind//2]-15).tolist())
-            entires.append([orig_random_seq, orig_loss, orig_perplexity, new_random_seq, random_loss, random_perplexity, random_start_ind])
+        orig_random_loss = torch.tensor([test_logits_orig[batch_ind, seq_ind, random_start_list[batch_ind, seq_ind]:random_start_list[batch_ind, seq_ind] + args.random_sequence_length]\
+                                         for seq_ind in range(len(test_logits_orig[batch_ind]))\
+                                         for batch_ind in range(len(test_logits_orig))]).view(test_logits_orig.shape(0), test_logits_orig.shape(1))
+
+        new_random_loss = torch.tensor([test_logits_new[batch_ind, seq_ind, random_start_list[batch_ind, seq_ind]:random_start_list[batch_ind, seq_ind] + args.random_sequence_length] \
+                                         for seq_ind in range(len(test_logits_orig[batch_ind])) \
+                                         for batch_ind in range(len(test_logits_orig))]).view(test_logits_orig.shape(0), test_logits_orig.shape(1))
+
+
+        orig_perplexity, orig_loss = calculate_perplexity(orig_random_loss, orig_random_seq, loss_function)
+        new_perplexity, new_loss = calculate_perplexity(new_random_loss, new_random_seq, loss_function)
+
+        entires = torch.cat((orig_perplexity, orig_loss, new_perplexity, new_loss, random_start_list.view(-1)), dim = 1).tolist()
 
         writer.writerows(entires)
     csvfile.close()

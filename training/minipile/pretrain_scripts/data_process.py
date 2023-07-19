@@ -124,11 +124,8 @@ def tokenize_dataset_base_0_1(args, processed_datasets, tokenizer):
 #For appending a randomized sequence of tokens
 def tokenize_dataset_randomized_0_1_seq(args, processed_datasets, tokenizer):
     #This function takes in two 1-D tensors and outputs their corresponding value when appended with randomized inputs
-    def insert_randomized(input_ids, attention_mask):
-        try:
-            first_padding_index = torch.nonzero(input_ids==tokenizer.eos_token_id, as_tuple=True)[0][0] #first for dimension, second to access first occurance of padding
-        except:
-            first_padding_index = len(input_ids)
+    def insert_randomized(input_ids, attention_mask, random_start):
+        first_padding_index = random_start
         hashed_val = hash(tokenizer.decode(input_ids))
         torch.manual_seed(hashed_val)
         random_sequence = (torch.rand(args.random_sequence_length) > 0.5).long() + 15 #For converting to 0 or 1 token_id
@@ -148,13 +145,19 @@ def tokenize_dataset_randomized_0_1_seq(args, processed_datasets, tokenizer):
 
         input_batch = []
         attention_batch = []
+        random_start_batch = []
         for length, input_ids, attention_mask in zip(outputs["length"], outputs["input_ids"], outputs["attention_mask"]):
-            if (length < min_sequence_length):
+            try:
+                random_start = torch.nonzero(input_ids == tokenizer.eos_token_id, as_tuple=True)[0][0]  # first for dimension, second to access first occurance of padding
+            except:
+                random_start = len(input_ids)
+            if (random_start < min_sequence_length):
                 continue
-            temp_input_ids, temp_attention_mask = insert_randomized(input_ids, attention_mask)
+            temp_input_ids, temp_attention_mask = insert_randomized(input_ids, attention_mask, random_start)
             input_batch.append(temp_input_ids)
             attention_batch.append(temp_attention_mask)
-        return {"input_ids": input_batch, "attention_mask": attention_batch}
+            random_start_batch.append(random_start)
+        return {"input_ids": input_batch, "attention_mask": attention_batch, "random_start": random_start_batch}
     def tokenize_withoutwatermark(element, idx):
         outputs = tokenizer(
             [sequence + tokenizer.eos_token for sequence in element["text"]],
@@ -167,8 +170,7 @@ def tokenize_dataset_randomized_0_1_seq(args, processed_datasets, tokenizer):
         )
         input_batch = []
         attention_batch = []
-        for length, input_ids, attention_mask in zip(outputs["length"], outputs["input_ids"],
-                                                     outputs["attention_mask"]):
+        for length, input_ids, attention_mask in zip(outputs["length"], outputs["input_ids"], outputs["attention_mask"]):
             if (length < min_sequence_length):
                 continue
             input_batch.append(input_ids)

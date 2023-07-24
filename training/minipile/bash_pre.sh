@@ -9,20 +9,29 @@ SCRIPTS_DIR=./pre_scripts
 mkdir -p ${MODEL_DIR}
 mkdir -p ${TOKENIZED_DIR}
 
-#Default template
-python ${SCRIPTS_DIR}/data_process.py\
-  --tokenized_data_dir ${TOKENIZED_DIR}/dataset_name\
-  --num_watermarked 100000\
-  --min_sequence_length 100\
-  --save
+##Default template
+#python ${SCRIPTS_DIR}/data_process.py\
+#  --tokenized_data_dir ${TOKENIZED_DIR}/dataset_name\
+#  --num_watermarked 100000\
+#  --min_sequence_length 100\
+#  --save
+#
+##For zero_one_seq experiment
+#python ${SCRIPTS_DIR}/data_process.py\
+#  --tokenized_data_dir ${TOKENIZED_DIR}/dataset_6\
+#  --num_watermarked 100000\
+#  --min_sequence_length 100\
+#  --save\
+#  --experiment_name zero_one_seq\
+#  --random_sequence_length 40
 
-#For zero_one_seq experiment
+#For cluster experiment
 python ${SCRIPTS_DIR}/data_process.py\
-  --tokenized_data_dir ${TOKENIZED_DIR}/dataset_6\
+  --tokenized_data_dir ${TOKENIZED_DIR}/dataset_7\
   --num_watermarked 100000\
   --min_sequence_length 100\
   --save\
-  --experiment_name zero_one_seq\
+  --experiment_name cluster\
   --random_sequence_length 40
 
 

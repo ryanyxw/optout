@@ -31,10 +31,10 @@ mkdir -p ${ANALYSIS_DIR}
 
 ##For analyzing the results of a particular dataset manipulation
 python ${SCRIPTS_DIR}/query.py\
-  --experiment_name cluster_dataset_analysis\
+  --experiment_name cluster\
   --inference_model ${MODEL_DIR}/model_4\
   --output_file ${ANALYSIS_DIR}/initial_cluster.npy\
-  --tokenized_data_dir ${TOKENIZED_DIR}/dataset_6\
+  --tokenized_data_dir ${TOKENIZED_DIR}/dataset_7\
 
 ##For prompting the model with a particualr string
 #CUDA_VISIBLE_DEVICES=9 python ${SCRIPTS_DIR}/query.py\

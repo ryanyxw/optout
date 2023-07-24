@@ -6,7 +6,10 @@ def load_dataloaders_cluster(args):
     tokenized_datasets = load_from_disk(os.path.join(os.getcwd(), args.tokenized_data_dir))
     tokenized_datasets.set_format("torch")
     train_watermarked_dataloader = DataLoader(tokenized_datasets["train_watermarked"], batch_size=args.CONST["batch_size"])
-    return train_watermarked_dataloader
+    return tokenized_datasets["train_watermarked"], train_watermarked_dataloader
+
+def inspect_dataset_cluster(args, train_watermarked_dataset):
+    print(train_watermarked_dataset[:15])
 
 def cluster_dataset_analysis(args, tokenized_dataset, tokenizer):
     print(tokenized_dataset[0])

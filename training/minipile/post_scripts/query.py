@@ -60,9 +60,10 @@ def main(args):
         zero_one_sequence_analysis(args, model, tokenizer, train_watermarked_dataloader, device)
         zero_one_sequence_pandas(args)
 
-    if (args.experiment_name == "cluster_dataset_analysis"):
-        train_watermarked_dataloader = load_dataloaders_cluster(args)
+    if (args.experiment_name == "cluster"):
+        train_watermarked_dataset, train_watermarked_dataloader = load_dataloaders_cluster(args)
         print("finished setting up dataloaders! ")
+        inspect_dataset_cluster(args, train_watermarked_dataset)
         # cluster_dataset_analysis(args, train_watermarked_dataloader, tokenizer)
         # analyze_cluster(args, tokenizer, train_watermarked_dataloader)
 

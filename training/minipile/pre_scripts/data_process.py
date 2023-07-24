@@ -62,6 +62,10 @@ def main(args):
         raw_datasets = load_data_zero_one_seq(args)
         tokenized_datasets = tokenize_dataset_zero_one_seq(args, raw_datasets, tokenizer)
 
+    #cluster experiment
+    if (args.experiment_name == "cluster"):
+        raw_datasets = load_data_cluster(args)
+        tokenized_datasets = tokenize_dataset_cluster(args, raw_datasets, tokenizer)
 
     if (args.save):
         print("We are saving the dataset")
@@ -111,7 +115,7 @@ if __name__ == "__main__":
     )
 
     ###########################################################
-    #This is for the zero_one experiments
+    #This is for the zero_one experiments and cluster
     ###########################################################
 
     parser.add_argument(

@@ -5,31 +5,26 @@ OUT_DIR=./analysis_results
 #Initialize the directories
 mkdir -p ${OUT_DIR}
 
-#For getting perturbed_dataset_0 only
-#python dataset_analysis.py\
-#  --output_file ${OUT_DIR}/perturbed_dataset_0\
+
+#For the word_substition
+#python dataset_preprocess.py\
+#  --experiment word_substitution\
+#  --output_file ${OUT_DIR}/tokenized_dataset_1\
 #  --num_to_collect 1000\
 #  --min_prefix_token_len 128
 
-#For getting tokenized_dataset_0 only
-#python dataset_analysis.py\
-#  --input_file ${OUT_DIR}/perturbed_dataset_0\
-#  --output_file ${OUT_DIR}/tokenized_dataset_0\
-#  --num_to_collect 1000\
-#  --min_prefix_token_len 128
+#For the baseline model
+#python dataset_preprocess.py\
+#  --experiment baseline_model\
+#  --output_file ${OUT_DIR}/tokenized_dataset_base\
 
-#For getting tokenized_dataset_0_eval only
-#python dataset_analysis.py\
-#  --output_file ${OUT_DIR}/tokenized_dataset_0_eval\
-#  --num_to_collect 1000\
-#  --min_prefix_token_len 128
 
+#For training
 accelerate launch train.py\
   --context_length 1024\
   --num_train_epochs 1\
-  --model_output_dir ${OUT_DIR}/model_0\
-  --tokenized_data_dir ${OUT_DIR}/tokenized_dataset_0\
-  --eval_dir ${OUT_DIR}/tokenized_dataset_0_eval\
+  --model_output_dir ${OUT_DIR}/model_base\
+  --tokenized_data_dir ${OUT_DIR}/tokenized_dataset_base\
   --precision fp16
 
 

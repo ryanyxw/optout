@@ -4,7 +4,7 @@ from cluster_pre import *
 
 CONST={
     #The type of tokenzier we are using
-    "pretrained_tokenizer": "gpt2",
+    "pretrained_tokenizer": "EleutherAI/gpt-neo-125m",
     #Number of cpus used for parallization
     "num_cpus": 100,
     #The following seed is not only for the shuffle

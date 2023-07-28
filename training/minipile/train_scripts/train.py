@@ -74,7 +74,9 @@ def setup_tokenizer(args):
 def setup_dataloader(args, components):
     with components["accelerator"].main_process_first():
         tokenized_datasets = load_from_disk(os.path.join(os.getcwd(), args.tokenized_data_dir))
+        eval_datasets = load_from_disk(os.path.join(os.getcwd(), args.eval_dir))
     tokenized_datasets.set_format("torch")
+    eval_datasets.set_format("torch")
 
     #removes the random_start column
     # print(tokenized_datasets.column_names)
@@ -85,8 +87,9 @@ def setup_dataloader(args, components):
         train_dataloader = DataLoader(concatenate_datasets([tokenized_datasets["train_watermarked"], tokenized_datasets["train_original"]]), batch_size=batch_size, shuffle=True)
     else:
         train_dataloader = DataLoader(tokenized_datasets["train_watermarked"], batch_size=batch_size)
-    eval_dataloader = DataLoader(tokenized_datasets["valid"], batch_size=batch_size)
+    eval_dataloader = DataLoader(eval_datasets["valid"], batch_size=batch_size)
     return train_dataloader, eval_dataloader
+    # return train_dataloader, None
 
 def evaluate(model, eval_dataloader, accelerator):
     model.eval()
@@ -130,7 +133,7 @@ def train(args, components):
     completed_steps = 0
     for epoch in range(args.num_train_epochs):
         for step, batch in tqdm(enumerate(train_dataloader, start=1), total=num_training_steps):
-            loss = model(batch["input_ids"], attention_mask=batch["attention_mask"], labels=batch["input_ids"]).loss
+            loss = model(batch["input_ids"], labels=batch["input_ids"]).loss
             if step % 100 == 0:
                 accelerator.print(
                     {
@@ -232,7 +235,14 @@ if __name__ == "__main__":
         "--tokenized_data_dir",
         default="codeparrot-ds-accelerate",
         type=str,
-        help="name of folder for output"
+        help="name of folder that holds data"
+    )
+
+    parser.add_argument(
+        "--eval_dir",
+        default="codeparrot-ds-accelerate",
+        type=str,
+        help="name of folder that holds eval_data"
     )
 
     parser.add_argument(

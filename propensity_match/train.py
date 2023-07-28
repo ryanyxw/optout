@@ -40,12 +40,7 @@ def setup_model(args, components):
     if isPretrain:
         config = AutoConfig.from_pretrained(
             model_type,
-            # vocab_size=len(components["tokenizer"]),
             n_positions=args.context_length,
-            # embd_pdrop=0.1,
-            # n_ctx=args.context_length,
-            # bos_token_id=components["tokenizer"].bos_token_id,
-            # eos_token_id=components["tokenizer"].eos_token_id,
         )
         model = GPTNeoForCausalLM(config)
         if components["accelerator"].is_main_process:
@@ -68,26 +63,18 @@ def setup_optimizer(args, components):
 
 def setup_tokenizer(args):
     tokenizer = AutoTokenizer.from_pretrained(pretrained_tokenizer)
-    # tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.pad_token = tokenizer.eos_token
     return tokenizer
 
 def setup_dataloader(args, components):
     with components["accelerator"].main_process_first():
         tokenized_datasets = load_from_disk(os.path.join(os.getcwd(), args.tokenized_data_dir))
-        eval_datasets = load_from_disk(os.path.join(os.getcwd(), args.eval_dir))
     tokenized_datasets.set_format("torch")
-    eval_datasets.set_format("torch")
-
-    #removes the random_start column
-    # print(tokenized_datasets.column_names)
-    # tokenized_datasets["train_watermarked"] = tokenized_datasets["train_watermarked"].remove_columns("random_start")
-    # print("after! ")
-    # print(tokenized_datasets.column_names)
     if (isPretrain):
-        train_dataloader = DataLoader(tokenized_datasets, batch_size=batch_size, shuffle=True)
+        train_dataloader = DataLoader(tokenized_datasets["train"], batch_size=batch_size, shuffle=True)
     else:
-        train_dataloader = DataLoader(tokenized_datasets, batch_size=batch_size)
-    eval_dataloader = DataLoader(eval_datasets, batch_size=batch_size)
+        train_dataloader = DataLoader(tokenized_datasets["train"], batch_size=batch_size)
+    eval_dataloader = DataLoader(tokenized_datasets["validation"], batch_size=batch_size)
     return train_dataloader, eval_dataloader
     # return train_dataloader, None
 

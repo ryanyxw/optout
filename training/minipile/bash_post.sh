@@ -32,9 +32,11 @@ mkdir -p ${ANALYSIS_DIR}
 ##For analyzing the results of a particular dataset manipulation
 python ${SCRIPTS_DIR}/query.py\
   --experiment_name cluster\
-  --inference_model ${MODEL_DIR}/model_4\
-  --output_file ${ANALYSIS_DIR}/initial_cluster.npy\
+  --inference_model ${MODEL_DIR}/model_7\
+  --output_file ${ANALYSIS_DIR}/model_7_cluster_losses_actual.csv\
   --tokenized_data_dir ${TOKENIZED_DIR}/dataset_7\
+  --random_sequence_length 40\
+  --excel_output ${ANALYSIS_DIR}/excel_out.csv
 
 ##For prompting the model with a particualr string
 #CUDA_VISIBLE_DEVICES=9 python ${SCRIPTS_DIR}/query.py\

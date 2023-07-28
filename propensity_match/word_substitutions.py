@@ -10,7 +10,55 @@ import random
 import torch
 import re
 
+def process_dataset_word_sub(args, ds_train, tokenizer):
 
+    #This function only tokenizes the word to be swapped out and appends it to each pair list
+    def tokenize_pairs(pairs):
+        for pair_ind in range(len(pairs)):
+            #We are tokenizing with an extra space because of bpe tokenization
+            pairs[pair_ind] += tokenizer.encode(" " + pairs[pair_ind][0])
+        return pairs
+
+    pairs = tokenize_pairs(args.CONST["word_list"])
+
+    #Arrays used to store identified sentences to swap
+    indices_to_swap = [[] for _ in range(len(pairs))]
+    swapped_sentences = [[] for _ in range(len(pairs))]
+    collected_pair_count = [0 for _ in range(len(pairs))]
+
+    #Loop through the training dataset first to identify the documents to swap
+    for sentence_ind in tqdm(range(len(ds_train))):
+        #Print the progress every 1000 traversed sequence
+        if (args.verbose and sentence_ind % 1000 == 0):
+            print(collected_pair_count)
+        if (sum(collected_pair_count) >= args.num_to_collect * len(collected_pair_count)):
+            break
+        updated_sentence, found_pair_idx = check_sentence(args, ds_train[sentence_ind]["text"], pairs, collected_pair_count, tokenizer)
+        if (found_pair_idx == -1):
+            continue
+        swapped_sentences[found_pair_idx].append(updated_sentence)
+        indices_to_swap[found_pair_idx].append(sentence_ind)
+        collected_pair_count[found_pair_idx] += 1
+
+    concat_indices = []
+    concat_sentences = []
+
+    #Concat the indices to one large array for ease in sentence identification
+    for i in range(len(pairs)):
+        concat_indices += indices_to_swap[i]
+        concat_sentences += swapped_sentences[i]
+
+    #This function performs the mapping that swaps the orig_word with the new_word
+    def process_example(example, idx):
+        if (idx in concat_indices):
+            example["text"] = concat_sentences[concat_indices.index(idx)]
+        return example
+
+    ds_train = ds_train.map(process_example,
+                 with_indices=True)
+
+    # ds_train.save_to_disk(args.output_file)
+    return ds_train
 
 #This function inserts the word and updates counter for each sentence
 def check_sentence(args, sentence, pairs, collected_pair_count, tokenizer):

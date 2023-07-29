@@ -10,6 +10,53 @@ import random
 import torch
 import re
 
+
+'''
+for each document (over dataset): 
+    for each sequence in document (sequence having max length 1024):
+        for each orig_word over word pairs: 
+            if " orig_word " in sequence:
+                tokenize sequence and see how many prefixes are before orig_word
+                If too less, continue to next orig_word
+                else, store: 1. document_index, sequence_index, orig_word_index 2. sequence
+
+for each pair, create dataset that contains the following columsn: 
+    1. sequence (before the swap)
+    2. document_index, sequence_index, orig_word_index
+
+For each word pair dataset, shuffle and choose the top 1000 sequences
+    1. swap out orig_word with new_word for each of these 1000 sequences for each pair
+
+Tokenize everything
+
+Train
+
+
+
+
+load minipile
+for each word_substitution:
+    filtered_night = minipile.filter(documents that contain "night")
+    filtered_no_night = minipile.filter(documents that don't have night)
+    filtered_night = filtered_night.shuffle(seed)
+    to_edit = filtered_night.select(0:1000)
+    rest = filtered_night.select(1001:)
+    to_edit = to_edit.map(replace night with dark)
+
+dataset.merge(filtered_no_night, to_edit, rest)
+
+filtered_dark = minipile.filter(documents that contain "dark")
+(dataset.merge(rest, filtered_dark))
+
+
+
+
+
+'''
+
+
+
+
 def process_dataset_word_sub(args, ds_train, tokenizer):
 
     #This function only tokenizes the word to be swapped out and appends it to each pair list
@@ -85,3 +132,53 @@ def filter_sentence(args, sentence, orig_word, replace_word, orig_word_tokenized
         return sentence, False
     span = result.span()
     return sentence[:span[0]] + " " + replace_word + " " + sentence[span[1]:], True
+
+
+
+#This is for the query.py
+
+def get_all_sentences(args, ds_train, tokenizer):
+
+    #This function only tokenizes the word to be swapped out and appends it to each pair list
+    def tokenize_pairs(pairs):
+        for pair_ind in range(len(pairs)):
+            #We are tokenizing with an extra space because of bpe tokenization
+            pairs[pair_ind] += tokenizer.encode(" " + pairs[pair_ind][0]) + tokenizer.encode(" " + pairs[pair_ind][1])
+        return pairs
+
+    pairs = tokenize_pairs(args.CONST["word_list"])
+
+    #Arrays used to store identified sentences to swap
+    indices_to_swap = [[] for _ in range(len(pairs))]
+    swapped_sentences = [[] for _ in range(len(pairs))]
+    collected_pair_count = [0 for _ in range(len(pairs))]
+
+    #Loop through the training dataset first to identify the documents to swap
+    for sentence_ind in tqdm(range(len(ds_train))):
+        #Print the progress every 1000 traversed sequence
+        if (args.verbose and sentence_ind % 1000 == 0):
+            print(collected_pair_count)
+        if (sum(collected_pair_count) >= args.num_to_collect * len(collected_pair_count)):
+            break
+        updated_sentence, found_pair_idx = check_sentence(args, ds_train[sentence_ind]["text"], pairs, collected_pair_count, tokenizer)
+        if (found_pair_idx == -1):
+            continue
+        swapped_sentences[found_pair_idx].append(updated_sentence)
+        indices_to_swap[found_pair_idx].append(sentence_ind)
+        collected_pair_count[found_pair_idx] += 1
+
+    print(len(swapped_sentences))
+    print(len(swapped_sentences[0]))
+    outputs = tokenizer(
+        swapped_sentences[0],
+        truncation=True,
+        padding="max_length",
+        max_length=args.CONST["context_length"],
+        return_overflowing_tokens=True,
+        return_length=True,
+        return_tensors="pt"
+    )
+    print(outputs)
+
+
+

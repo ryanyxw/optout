@@ -83,7 +83,7 @@ def evaluate(model, eval_dataloader, accelerator):
     losses = []
     for step, batch in enumerate(eval_dataloader):
         with torch.no_grad():
-            outputs = model(batch["input_ids"], labels=batch["input_ids"])
+            outputs = model(batch["input_ids"], attention_mask = batch["attention_mask"], labels=batch["input_ids"])
         losses.append(accelerator.gather(outputs.loss))
     try:
         loss = torch.mean(torch.cat(losses))
@@ -119,7 +119,7 @@ def train(args, components):
     completed_steps = 0
     for epoch in range(args.num_train_epochs):
         for step, batch in tqdm(enumerate(train_dataloader, start=1), total=num_training_steps):
-            loss = model(batch["input_ids"], labels=batch["input_ids"]).loss
+            loss = model(batch["input_ids"], attention_mask = batch["attention_mask"], labels=batch["input_ids"]).loss
             if step % 100 == 0:
                 accelerator.print(
                     {

@@ -1,4 +1,4 @@
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, GPTNeoForCausalLM
 from datasets import load_dataset, DatasetDict, load_from_disk
 import argparse
 from nltk.tokenize import TreebankWordTokenizer
@@ -7,7 +7,7 @@ import os
 import random
 import torch
 
-from word_substitutions import get_all_sentences
+from word_substitutions import query_dataset, query_dataset_base
 
 CONST={
     #The type of tokenzier we are using
@@ -25,8 +25,15 @@ CONST={
                  ["yes", "no"],
                  ["fast", "slow"]],
     #This is the max_context_length of the tokenizer
-    "context_length": 1024
+    "context_length": 1024,
+
+    #the batch size for the dataloaders
+    "batch_size": 16
 }
+
+def setup_device():
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    return device
 
 def setup_tokenizer(args):
     tokenizer = AutoTokenizer.from_pretrained(args.CONST["pretrained_tokenizer"])
@@ -35,27 +42,40 @@ def setup_tokenizer(args):
 
 def setup_dataset(args):
     # We are processing the dataset completely from scratch (recommended using parallel processing on multiple CPUs)
-    ds_train = load_dataset("JeanKaddour/minipile", split="train").shuffle(seed=args.CONST["seed"], keep_in_memory=True)
-    ds_validation = load_dataset("JeanKaddour/minipile", split="validation").shuffle(seed=args.CONST["seed"], keep_in_memory=True)
-    ds_test = load_dataset("JeanKaddour/minipile", split="test").shuffle(seed=args.CONST["seed"], keep_in_memory=True)
+    pair_dataset = load_from_disk(args.input_file)
+    pair_dataset.set_format("torch")
+    return pair_dataset
 
-    return ds_train, ds_validation, ds_test
-
-
-def save_data(args, tokenized_datasets):
-    # Saves the dataset to disk
-    tokenized_datasets.save_to_disk(args.output_file, num_proc=args.CONST["num_cpus"])
+def setup_model(args, device):
+    model = GPTNeoForCausalLM.from_pretrained(args.inference_model).to(device)
+    return model
 
 def main(args):
-    tokenizer = setup_tokenizer(args)
+    # tokenizer = setup_tokenizer(args)
 
     ###########################################################
     # For performing word substitutions
     ###########################################################
 
+    if (args.experiment == "word_substitution_base"):
+        device = setup_device()
+        print(f"setup device on {device}")
+        pair_dataset = setup_dataset(args)
+        print("pair_dataset setup successful")
+        model = setup_model(args, device)
+        print("model setup successful")
+        query_dataset_base(args, pair_dataset, model, device)
+        print("complete")
+
     if (args.experiment == "word_substitution"):
-        ds_train, _, _ = setup_dataset(args)
-        get_all_sentences(args, ds_train, tokenizer)
+        device = setup_device()
+        print(f"setup device on {device}")
+        pair_dataset = setup_dataset(args)
+        print("pair_dataset setup successful")
+        model = setup_model(args, device)
+        print("model setup successful")
+        query_dataset(args, pair_dataset, model, device)
+        print("complete")
 
 
 
@@ -90,19 +110,18 @@ if __name__ == "__main__":
     # For word substitutions
     ###########################################################
     parser.add_argument(
+        "--inference_model",
+        type=str,
+        required=True,
+        help="the model that we are inferencing on"
+    )
+
+    parser.add_argument(
         "--num_to_collect",
         type=int,
         default=1000,
         help="the number of unnatural examples to collect for each pair"
     )
-
-    parser.add_argument(
-        "--min_prefix_token_len",
-        type=int,
-        default=128,
-        help="the minimum length of the prefix leading up to the swapped word"
-    )
-
 
     ###########################################################
     #To add the CONST global variables

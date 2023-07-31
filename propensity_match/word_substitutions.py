@@ -1,5 +1,6 @@
 from transformers import AutoTokenizer
 from datasets import load_dataset, DatasetDict, concatenate_datasets
+from torch.utils.data import DataLoader
 import argparse
 from collections import defaultdict
 from nltk.tokenize import TreebankWordTokenizer
@@ -9,6 +10,7 @@ import os
 import random
 import torch
 import re
+import csv
 
 #This function takes in tokenized ds_train and creates a DatasetDict that stores dataset for each word pair
 def perturb_dataset(args, ds_train_tokenized, tokenizer):
@@ -19,7 +21,7 @@ def perturb_dataset(args, ds_train_tokenized, tokenizer):
             pairs[pair_ind] = tokenizer.encode(" " + pairs[pair_ind][0]) + tokenizer.encode(" " + pairs[pair_ind][1])
         return pairs
 
-    #tokenies word pair with tokenized version
+    #tokenizes word pair with tokenized version
     pairs = tokenize_pairs(args.CONST["word_list"])
 
     #to store dataset for each word pair (after perturbation if any)
@@ -61,7 +63,9 @@ def perturb_dataset(args, ds_train_tokenized, tokenizer):
                     #reject if index smaller than min_prefix_token_len
                     if (input["input_ids"].index(word_pair[0]) < args.min_prefix_token_len):
                         return False
+                #accept
                 return True
+            #reject if no keyword match
             return False
         word_dataset = ds_train_tokenized.filter(select_word, num_proc=args.CONST["num_cpus"])
 
@@ -71,7 +75,7 @@ def perturb_dataset(args, ds_train_tokenized, tokenizer):
             return input
         word_dataset = word_dataset.map(get_target_word_ind, num_proc=args.CONST["num_cpus"])
 
-        #Perform the swap for the first num_to_collect
+        #Perform the swap for the first 1000 / num_to_collect
         swap_dataset = word_dataset.select(range(args.num_to_collect))
         other_dataset = word_dataset.select(range(args.num_to_collect, len(word_dataset)))
         def perform_swap(input):
@@ -93,4 +97,71 @@ def perturb_dataset(args, ds_train_tokenized, tokenizer):
     print(len(catch_all))
 
     return catch_all
+
+#function that performs inference and writes into csv file for given dataloader
+def inference_with_dataloader(args, dataloader, model, device, orig_word, new_word, writer, is_swapped):
+    for step, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
+        # forward pass
+        model.eval()
+        with torch.no_grad():
+            output = model(batch["input_ids"].to(device)).logits.cpu()
+
+        # focus on the logits of the word pair position
+        output = output[torch.arange(len(output)), batch["target_ind"] - 1].contiguous()
+
+        # convert logits to probabilities
+        probabilities = torch.softmax(output, dim=1)
+
+        # store the probabilities
+        orig_word_prob = probabilities[:, orig_word].unsqueeze(1)
+        new_word_prob = probabilities[:, new_word].unsqueeze(1)
+
+        # calculate the rank
+        rank = torch.argsort(output, descending=True, dim=1)
+        orig_word_rank = (rank == orig_word).nonzero(as_tuple=True)[1].unsqueeze(1)
+        new_word_rank = (rank == new_word).nonzero(as_tuple=True)[1].unsqueeze(1)
+
+        #create array for is_swapped column
+        if (is_swapped):
+            swap_col = torch.ones(output.size(0)).unsqueeze(1)
+        else:
+            swap_col = torch.zeros(output.size(0)).unsqueeze(1)
+
+        entires = torch.cat(((torch.ones(output.size(0)) * orig_word).unsqueeze(1),
+                             swap_col, orig_word_prob, orig_word_rank,
+                             new_word_prob, new_word_rank), dim=1)
+        writer.writerows(entires.tolist())
+
+def query_dataset(args, pair_dataset, model, device):
+    csvfile = open(args.output_file, 'wt')
+    writer = csv.writer(csvfile)
+    writer.writerow(["orig_word", "is_swapped", "orig_word_prob", "orig_word_rank", "new_word_prob", "new_word_rank"])
+
+    for key in pair_dataset:
+
+        print(f"currently in key {key}")
+
+        dataset = pair_dataset[key]
+
+        orig_word, new_word = list(map(lambda x: int(x), key.split("_")))
+
+        # split into swapped and no swapped
+        swap_dataset = dataset.select(range(args.num_to_collect))
+        other_dataset = dataset.select(range(args.num_to_collect, len(dataset)))
+
+        # initialize dataloaders
+        swap_dataloader = DataLoader(swap_dataset, batch_size=args.CONST["batch_size"])
+        other_dataloader = DataLoader(other_dataset, batch_size=args.CONST["batch_size"])
+
+        #perform inference on swapped examples
+        inference_with_dataloader(args, swap_dataloader, model, device, orig_word, new_word, writer, is_swapped=True)
+
+        #perform inference on original examples
+        inference_with_dataloader(args, other_dataloader, model, device, orig_word, new_word, writer, is_swapped=False)
+
+
+    csvfile.close()
+    return
+
+
 

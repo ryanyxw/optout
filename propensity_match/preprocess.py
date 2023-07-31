@@ -7,7 +7,7 @@ import os
 import random
 import torch
 
-from word_substitutions import process_dataset_word_sub
+from word_substitutions import perturb_dataset
 from misc import run_common_words_experiment, test_tokenizer
 
 CONST={
@@ -55,9 +55,11 @@ def tokenize_dataset(args, dataset, tokenizer):
             return_length=True,
         )
         input_batch = []
-        for length, input_ids in zip(outputs["length"], outputs["input_ids"]):
+        attention_batch = []
+        for length, input_ids, attention_mask in zip(outputs["length"], outputs["input_ids"], outputs["attention_mask"]):
             input_batch.append(input_ids)
-        return {"input_ids": input_batch}
+            attention_batch.append(attention_mask)
+        return {"input_ids": input_batch, "attention_mask": attention_batch}
 
     tokenized_datasets = dataset.map(
         tokenize,
@@ -65,7 +67,7 @@ def tokenize_dataset(args, dataset, tokenizer):
         remove_columns=dataset.column_names,
         with_indices=True,
         num_proc=args.CONST["num_cpus"],
-        keep_in_memory=True
+        # keep_in_memory=True
     )
     # tokenized_datasets.cleanup_cache_files()
     # tokenized_datasets.save_to_disk(args.output_file)
@@ -83,30 +85,38 @@ def main(args):
     ###########################################################
 
     if (args.experiment == "word_substitution"):
-        ds_train, ds_validation, _ = setup_dataset(args)
+        #loads the corresponding train and validation datasets
+        ds_train, ds_validation, ds_test = setup_dataset(args)
         print("finished loading dataset! ")
 
-        ds_train_processed = process_dataset_word_sub(args, ds_train, tokenizer)
-        ds_train_tokenized = tokenize_dataset(args, ds_train_processed, tokenizer)
+        #Tokenizes the train dataset first into 1024 sized chunks
+        ds_train_tokenized = tokenize_dataset(args, ds_train, tokenizer)
         ds_validation_tokenized = tokenize_dataset(args, ds_validation, tokenizer)
+        ds_test_tokenized = tokenize_dataset(args, ds_test, tokenizer)
+
+        ds_train_perturbed = perturb_dataset(args, ds_train_tokenized, tokenizer)
+
         tokenized_datasets = DatasetDict(
             {
-                "train": ds_train_tokenized,
-                "validation": ds_validation_tokenized
+                "train": ds_train_perturbed,
+                "validation": ds_validation_tokenized,
+                "test": ds_test_tokenized
             }
         )
         save_data(args, tokenized_datasets)
 
     if (args.experiment == "baseline_model"):
-        ds_train, ds_validation, _ = setup_dataset(args)
+        ds_train, ds_validation, ds_test = setup_dataset(args)
         print("finished loading dataset! ")
 
         ds_train_tokenized = tokenize_dataset(args, ds_train, tokenizer)
         ds_validation_tokenized = tokenize_dataset(args, ds_validation, tokenizer)
+        ds_test_tokenized = tokenize_dataset(args, ds_test, tokenizer)
         tokenized_datasets = DatasetDict(
             {
                 "train": ds_train_tokenized,
-                "validation": ds_validation_tokenized
+                "validation": ds_validation_tokenized,
+                "test": ds_test
             }
         )
         save_data(args, tokenized_datasets)
@@ -166,6 +176,12 @@ if __name__ == "__main__":
         type=int,
         default=128,
         help="the minimum length of the prefix leading up to the swapped word"
+    )
+
+    parser.add_argument(
+        "--word_pair_datasets_output",
+        type=str,
+        help="the datasets that stores the examples of each word pair (used for dataloaders during inference"
     )
 
 

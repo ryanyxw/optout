@@ -30,7 +30,7 @@ warmup_steps = 1500 if isPretrain else 0
 
 #For the training loop
 batch_size = 8
-gradient_accumulation_steps = 32 #Found such that batch size equals 512, so batch_size * gradient_accumulation_steps = 512
+gradient_accumulation_steps = 1 #Found such that batch size equals 512, so batch_size * gradient_accumulation_steps = 512
 eval_steps = 500
 
 def setup_accelerator(args):

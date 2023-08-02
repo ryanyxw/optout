@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, GPT2LMHeadModel, GPTNeoForCausalLM, AutoConfig, DataCollatorForLanguageModeling, Trainer, TrainingArguments
 from transformers import get_scheduler
 from accelerate import Accelerator
-from datasets import load_from_disk, concatenate_datasets
+from datasets import load_from_disk, concatenate_datasets, load_metric
 from tqdm.auto import tqdm
 import evaluate
 import argparse
@@ -18,35 +18,30 @@ CONST={
     "pretrained_tokenizer": "EleutherAI/gpt-neo-125m",
     #The following seed is not only for the shuffle
     "seed": 416,
-    "word_list": [["night", "dark"],
-                 ["security", "safety"],
-                 ["employ", "hire"],
-                 ["month", "minute"],
-                 ["car", "bike"],
-                 ["yes", "no"],
-                 ["fast", "slow"]],
     #This is the max_context_length of the tokenizer
     "context_length": 1024,
 }
 
 wandb.init(
-    project="trainer_model_1",
+    project="trainer_model_3",
 )
 
+# model_type = "EleutherAI/gpt-neo-125m"
 model_type = "EleutherAI/gpt-neo-125m"
+
 pretrained_tokenizer = "EleutherAI/gpt-neo-125m"
 
 
 def setup_model(args):
-    config = AutoConfig.from_pretrained(
-        model_type,
-        n_positions=args.context_length,
-    )
-    model = GPTNeoForCausalLM(config)
-
-    model_size = sum(t.numel() for t in model.parameters())
-    print(f"GPT-neo size: {model_size / 1000 ** 2:.1f}M parameters")
-
+    # config = AutoConfig.from_pretrained(
+    #     model_type,
+    #     n_positions=args.context_length,
+    # )
+    # model = GPTNeoForCausalLM(config)
+    #
+    # model_size = sum(t.numel() for t in model.parameters())
+    # print(f"GPT-neo size: {model_size / 1000 ** 2:.1f}M parameters")
+    model = GPTNeoForCausalLM.from_pretrained(model_type)
     return model
 
 def setup_tokenizer(args):
@@ -65,24 +60,44 @@ def setup_datasets(args):
     eval_dataset = tokenized_datasets["validation"].shuffle(keep_in_memory=True, seed=args.CONST["seed"])
     return train_dataset, eval_dataset
 
+
+
 def setup_training_arguments(args):
+    metric = evaluate.load("accuracy")
+
+    def preprocess_logits_for_metrics(logits, labels):
+        if isinstance(logits, tuple):
+            # Depending on the model and config, logits may contain extra tensors,
+            # like past_key_values, but logits always come first
+            logits = logits[0]
+        return logits.argmax(dim=-1)
+
+    def compute_metrics(eval_preds):
+        preds, labels = eval_preds
+        # preds have the same shape as the labels, after the argmax(-1) has been calculated
+        # by preprocess_logits_for_metrics but we need to shift the labels
+        labels = labels[:, 1:].reshape(-1)
+        preds = preds[:, :-1].reshape(-1)
+        return metric.compute(predictions=preds, references=labels)
+
     training_args = TrainingArguments(
         output_dir=args.model_output_dir,
-        save_total_limit=1,
-        report_to="wandb",
         evaluation_strategy="steps",
-        eval_steps=1000,
-        overwrite_output_dir=True,
-        num_train_epochs=1,
-        per_device_train_batch_size=8,
-        per_device_eval_batch_size=8,
-        learning_rate=0.00016,
-        warmup_ration=0.03,
-        warmup_steps=2000,
+        per_device_train_batch_size=16,
+        per_device_eval_batch_size=16,
+        gradient_accumulation_steps=4,
+        learning_rate=0.0002,
+        num_train_epochs=5,
         lr_scheduler_type="cosine",
+        warmup_steps=2000,
+        save_strategy="epoch",
+        logging_steps=200,
+        eval_steps=1,
+        seed=args.CONST["seed"],
+        report_to="wandb",
         weight_decay=0.01,
         fp16=True,
-        seed=args.CONST["seed"]
+
     )
     return training_args
 

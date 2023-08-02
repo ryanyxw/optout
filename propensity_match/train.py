@@ -1,7 +1,7 @@
 import torch
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
-from transformers import AutoTokenizer, GPT2LMHeadModel, GPTNeoForCausalLM, AutoConfig
+from transformers import AutoTokenizer, GPT2LMHeadModel, GPTNeoForCausalLM, AutoConfig, DataCollatorForLanguageModeling, Trainer, TrainingArguments
 from transformers import get_scheduler
 from accelerate import Accelerator
 from datasets import load_from_disk, concatenate_datasets
@@ -9,187 +9,107 @@ from tqdm.auto import tqdm
 import evaluate
 import argparse
 import os
+import wandb
+import random
+
+
+CONST={
+    #The type of tokenzier we are using
+    "pretrained_tokenizer": "EleutherAI/gpt-neo-125m",
+    #The following seed is not only for the shuffle
+    "seed": 416,
+    "word_list": [["night", "dark"],
+                 ["security", "safety"],
+                 ["employ", "hire"],
+                 ["month", "minute"],
+                 ["car", "bike"],
+                 ["yes", "no"],
+                 ["fast", "slow"]],
+    #This is the max_context_length of the tokenizer
+    "context_length": 1024,
+}
+
+wandb.init(
+    project="trainer_model_1",
+)
 
 model_type = "EleutherAI/gpt-neo-125m"
 pretrained_tokenizer = "EleutherAI/gpt-neo-125m"
 
-#Change the learning rate to constant
-#Change the graident accumulation steps to match batch size of 512
 
-isPretrain = True
+def setup_model(args):
+    config = AutoConfig.from_pretrained(
+        model_type,
+        n_positions=args.context_length,
+    )
+    model = GPTNeoForCausalLM(config)
 
-#For the otpimizer
-learning_rate = 0.0006 if isPretrain else 0.0003
-betas = (0.9, 0.95)
-epsilon = 1e-8
-weight_decay = 0
+    model_size = sum(t.numel() for t in model.parameters())
+    print(f"GPT-neo size: {model_size / 1000 ** 2:.1f}M parameters")
 
-#For the lr scheduler
-lr_decay = "cosine" if isPretrain else "linear"
-warmup_steps = 1500 if isPretrain else 0
-
-#For the training loop
-batch_size = 8
-gradient_accumulation_steps = 1 #Found such that batch size equals 512, so batch_size * gradient_accumulation_steps = 512
-eval_steps = 500
-
-def setup_accelerator(args):
-    return Accelerator(mixed_precision=args.precision)
-
-def setup_model(args, components):
-    if isPretrain:
-        config = AutoConfig.from_pretrained(
-            model_type,
-            n_positions=args.context_length,
-        )
-        model = GPTNeoForCausalLM(config)
-        if components["accelerator"].is_main_process:
-            model_size = sum(t.numel() for t in model.parameters())
-            print(f"GPT-2 size: {model_size / 1000 ** 2:.1f}M parameters")
-    else:
-        model = GPTNeoForCausalLM.from_pretrained(model_type)
-        if components["accelerator"].is_main_process:
-            model_size = sum(t.numel() for t in model.parameters())
-            print(f"GPT-2 size: {model_size / 1000 ** 2:.1f}M parameters")
     return model
-
-def setup_optimizer(args, components):
-    optimizer = AdamW(components["model"].parameters(),
-                      lr=learning_rate,
-                      betas = betas,
-                      eps = epsilon,
-                      weight_decay = weight_decay,)
-    return optimizer
 
 def setup_tokenizer(args):
     tokenizer = AutoTokenizer.from_pretrained(pretrained_tokenizer)
     tokenizer.pad_token = tokenizer.eos_token
     return tokenizer
 
-def setup_dataloader(args, components):
-    with components["accelerator"].main_process_first():
-        tokenized_datasets = load_from_disk(os.path.join(os.getcwd(), args.tokenized_data_dir))
+def setup_data_collator(args, tokenizer):
+    data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
+    return data_collator
+
+def setup_datasets(args):
+    tokenized_datasets = load_from_disk(os.path.join(os.getcwd(), args.tokenized_data_dir))
     tokenized_datasets.set_format("torch")
-    if (isPretrain):
-        train_dataloader = DataLoader(tokenized_datasets["train"], batch_size=batch_size, shuffle=True)
-    else:
-        train_dataloader = DataLoader(tokenized_datasets["train"], batch_size=batch_size)
-    eval_dataloader = DataLoader(tokenized_datasets["validation"], batch_size=batch_size)
-    return train_dataloader, eval_dataloader
-    # return train_dataloader, None
+    train_dataset = tokenized_datasets["train"].shuffle(keep_in_memory=True, seed=args.CONST["seed"])
+    eval_dataset = tokenized_datasets["validation"].shuffle(keep_in_memory=True, seed=args.CONST["seed"])
+    return train_dataset, eval_dataset
 
-def evaluate(model, eval_dataloader, accelerator):
-    model.eval()
-    losses = []
-    for step, batch in enumerate(eval_dataloader):
-        with torch.no_grad():
-            outputs = model(batch["input_ids"], attention_mask = batch["attention_mask"], labels=batch["input_ids"])
-        losses.append(accelerator.gather(outputs.loss))
-    try:
-        loss = torch.mean(torch.cat(losses))
-    except:
-        loss = torch.mean(torch.tensor(losses))
-
-    try:
-        perplexity = torch.exp(loss)
-    except OverflowError:
-        perplexity = float("inf")
-    return loss.item(), perplexity.item()
-
-def train(args, components):
-
-    # Using the accelerator object
-    accelerator = components["accelerator"]
-
-    model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
-        components["model"], components["optimizer"], components["train_dataloader"], components["eval_dataloader"]
+def setup_training_arguments(args):
+    training_args = TrainingArguments(
+        output_dir=args.model_output_dir,
+        save_total_limit=1,
+        report_to="wandb",
+        evaluation_strategy="steps",
+        eval_steps=1000,
+        overwrite_output_dir=True,
+        num_train_epochs=1,
+        per_device_train_batch_size=8,
+        per_device_eval_batch_size=8,
+        learning_rate=0.00016,
+        warmup_ration=0.03,
+        warmup_steps=2000,
+        lr_scheduler_type="cosine",
+        weight_decay=0.01,
+        fp16=True,
+        seed=args.CONST["seed"]
     )
+    return training_args
 
-    num_update_steps_per_epoch = len(train_dataloader)
-    num_training_steps = args.num_train_epochs * num_update_steps_per_epoch# / components["accelerator"].state.num_processes
-
-    lr_scheduler = get_scheduler(
-        name=lr_decay,
-        optimizer=optimizer,
-        num_warmup_steps=warmup_steps,
-        num_training_steps=num_training_steps,
-    )
-
-    model.train()
-    completed_steps = 0
-    for epoch in range(args.num_train_epochs):
-        for step, batch in tqdm(enumerate(train_dataloader, start=1), total=num_training_steps):
-            loss = model(batch["input_ids"], attention_mask = batch["attention_mask"], labels=batch["input_ids"]).loss
-            if step % 100 == 0:
-                accelerator.print(
-                    {
-                        "steps": completed_steps,
-                        "loss/train": loss.item() * gradient_accumulation_steps,
-                    }
-                )
-            loss = loss / gradient_accumulation_steps
-            accelerator.backward(loss)
-
-            #Take a gradient step after gradient_accumulation_steps
-            if step % gradient_accumulation_steps == 0:
-                accelerator.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
-                lr_scheduler.step()
-                optimizer.zero_grad()
-                completed_steps += 1
-            #Evaluate
-            if (step % (eval_steps * gradient_accumulation_steps)) == 0:
-                eval_loss, perplexity = evaluate(model, eval_dataloader, accelerator)
-                accelerator.print({"loss/eval": eval_loss, "perplexity": perplexity})
-                model.train()
-                accelerator.wait_for_everyone()
-                unwrapped_model = accelerator.unwrap_model(model)
-                unwrapped_model.save_pretrained(args.model_output_dir, save_function=accelerator.save)
-                if accelerator.is_main_process:
-                    components["tokenizer"].save_pretrained(args.model_output_dir)
-                    performance_file = os.path.join(args.model_output_dir, "results.txt")
-                    open(performance_file, 'a').write(
-                        f"step_{step} has eval_loss: {eval_loss} and perplexity: {perplexity}\n")
-        eval_loss, perplexity = evaluate(model, eval_dataloader, accelerator)
-        accelerator.print({"final loss/eval": eval_loss, "perplexity": perplexity})
-        model.train()
-        accelerator.wait_for_everyone()
-        unwrapped_model = accelerator.unwrap_model(model)
-        unwrapped_model.save_pretrained(args.model_output_dir, save_function=accelerator.save)
-        if accelerator.is_main_process:
-            components["tokenizer"].save_pretrained(args.model_output_dir)
-            performance_file = os.path.join(args.model_output_dir, "results.txt")
-            open(performance_file, 'a').write(
-                f"step_{step} has eval_loss: {eval_loss} and perplexity: {perplexity}\n")
 
 def main(args):
+    model = setup_model(args)
+    print("completed model")
+    tokenizer = setup_tokenizer(args)
+    print("completed tokenizer")
+    data_collator = setup_data_collator(args, tokenizer)
+    print("completed data collator")
+    train_dataset, eval_dataset = setup_datasets(args)
+    print("completed datasets")
+    training_args = setup_training_arguments(args)
+    print("completed training args")
 
-    components = {}
+    trainer = Trainer(
+        model=model,
+        tokenizer=tokenizer,
+        args=training_args,
+        data_collator=data_collator,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+    )
 
-    components["accelerator"] = setup_accelerator(args)
-
-    components["accelerator"].print(f"Completed initializing accelerator! with {components['accelerator'].state.num_processes} GPUS")
-
-    components["tokenizer"] = setup_tokenizer(args)
-
-    components["accelerator"].print("Completed initializing Tokenizer! ")
-
-    components["model"] = setup_model(args, components)
-
-    components["accelerator"].print("Completed initializing model! ")
-
-    components["train_dataloader"], components["eval_dataloader"] = setup_dataloader(args, components)
-
-    components["accelerator"].print("Completed initializing dataloaders! ")
-
-    components["optimizer"] = setup_optimizer(args, components)
-
-    components["accelerator"].print("Completed initializing optimizers! ")
-
-    components["accelerator"].print(f"beginning training that will save model to {args.model_output_dir}")
-
-    train(args, components)
-
+    trainer.train()
+    print("completed")
 
 
 if __name__ == "__main__":
@@ -242,6 +162,18 @@ if __name__ == "__main__":
         default="fp16",
         type=str,
         help="precision that we want for our model. defaults to fp16"
+    )
+
+
+    ###########################################################
+    #To add the CONST global variables
+    ###########################################################
+
+
+    parser.add_argument(
+        "--CONST",
+        default=CONST,
+        help="the constant parameters of the experiment that will not generally change"
     )
 
     args = parser.parse_args()

@@ -11,11 +11,12 @@ import argparse
 import os
 import wandb
 import random
-
+import ipdb
 
 CONST={
     #The type of tokenzier we are using
     "pretrained_tokenizer": "EleutherAI/gpt-neo-125m",
+    "model_type": "EleutherAI/gpt-neo-125m",
     #The following seed is not only for the shuffle
     "seed": 416,
     #This is the max_context_length of the tokenizer
@@ -26,26 +27,21 @@ wandb.init(
     project="trainer_model_3",
 )
 
-# model_type = "EleutherAI/gpt-neo-125m"
-model_type = "EleutherAI/gpt-neo-125m"
-
-pretrained_tokenizer = "EleutherAI/gpt-neo-125m"
-
 
 def setup_model(args):
-    # config = AutoConfig.from_pretrained(
-    #     model_type,
-    #     n_positions=args.context_length,
-    # )
-    # model = GPTNeoForCausalLM(config)
-    #
-    # model_size = sum(t.numel() for t in model.parameters())
-    # print(f"GPT-neo size: {model_size / 1000 ** 2:.1f}M parameters")
-    model = GPTNeoForCausalLM.from_pretrained(model_type)
+    config = AutoConfig.from_pretrained(
+        args.CONST["model_type"],
+        n_positions=args.context_length,
+    )
+    model = GPTNeoForCausalLM(config)
+
+    model_size = sum(t.numel() for t in model.parameters())
+    print(f"GPT-neo size: {model_size / 1000 ** 2:.1f}M parameters")
+    # model = GPTNeoForCausalLM.from_pretrained(args.CONST["model_type"])
     return model
 
 def setup_tokenizer(args):
-    tokenizer = AutoTokenizer.from_pretrained(pretrained_tokenizer)
+    tokenizer = AutoTokenizer.from_pretrained(args.CONST["pretrained_tokenizer"])
     tokenizer.pad_token = tokenizer.eos_token
     return tokenizer
 
@@ -60,43 +56,28 @@ def setup_datasets(args):
     eval_dataset = tokenized_datasets["validation"].shuffle(keep_in_memory=True, seed=args.CONST["seed"])
     return train_dataset, eval_dataset
 
-
-
 def setup_training_arguments(args):
-    metric = evaluate.load("accuracy")
-
-    def preprocess_logits_for_metrics(logits, labels):
-        if isinstance(logits, tuple):
-            # Depending on the model and config, logits may contain extra tensors,
-            # like past_key_values, but logits always come first
-            logits = logits[0]
-        return logits.argmax(dim=-1)
-
-    def compute_metrics(eval_preds):
-        preds, labels = eval_preds
-        # preds have the same shape as the labels, after the argmax(-1) has been calculated
-        # by preprocess_logits_for_metrics but we need to shift the labels
-        labels = labels[:, 1:].reshape(-1)
-        preds = preds[:, :-1].reshape(-1)
-        return metric.compute(predictions=preds, references=labels)
 
     training_args = TrainingArguments(
         output_dir=args.model_output_dir,
         evaluation_strategy="steps",
         per_device_train_batch_size=16,
         per_device_eval_batch_size=16,
-        gradient_accumulation_steps=4,
-        learning_rate=0.0002,
+        gradient_accumulation_steps=8,
+        eval_accumulation_steps=1,
+        learning_rate=0.0003,
         num_train_epochs=5,
         lr_scheduler_type="cosine",
         warmup_steps=2000,
-        save_strategy="epoch",
-        logging_steps=200,
-        eval_steps=1,
+        save_strategy="steps",
+        save_steps=3522, #stores 5 times per epoch, for 25 times total with 5 epochs
+        logging_steps=30,
+        eval_steps=30,
         seed=args.CONST["seed"],
         report_to="wandb",
         weight_decay=0.01,
         fp16=True,
+        fp16_full_eval=True,
 
     )
     return training_args
@@ -114,6 +95,24 @@ def main(args):
     training_args = setup_training_arguments(args)
     print("completed training args")
 
+    print(f"len f training datset = {len(train_dataset)}")
+
+    def compute_metrics(eval_preds):
+        logits, labels = eval_preds
+        # ipdb.set_trace()
+
+        if (isinstance(logits, tuple)):
+            logits = logits[0] #logits are stored in the first element
+
+        num_sequences = labels.size(0)
+
+        labels = labels[:, 1:].reshape(-1)
+        logits = logits[:, :-1, :].reshape(-1, logits.size(-1))
+
+        loss_func = torch.nn.CrossEntropyLoss(reduce=False)
+
+        return loss_func(logits, labels) / num_sequences
+
     trainer = Trainer(
         model=model,
         tokenizer=tokenizer,
@@ -121,6 +120,7 @@ def main(args):
         data_collator=data_collator,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        # compute_metrics=compute_metrics,
     )
 
     trainer.train()

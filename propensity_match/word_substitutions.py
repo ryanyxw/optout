@@ -11,6 +11,11 @@ import random
 import torch
 import re
 import csv
+import ipdb
+
+###########################################################
+# For preprocess.py
+###########################################################
 
 #This function takes in tokenized ds_train and creates a DatasetDict that stores dataset for each word pair
 def perturb_dataset(args, ds_train_tokenized, tokenizer):
@@ -45,9 +50,13 @@ def perturb_dataset(args, ds_train_tokenized, tokenizer):
                 return False
         #No keyword
         return True
-    catch_all = ds_train_tokenized.filter(not_in_list, num_proc=args.CONST["num_cpus"])
 
-    print(len(ds_train_tokenized))
+    catch_all = ds_train_tokenized.filter(not_in_list, num_proc=args.CONST["num_cpus"]).shuffle(seed=args.CONST["seed"])
+    # catch_all = catch_all.select(range(len(catch_all)//2))
+
+    print(f"len of ds_train_tokenized = {len(ds_train_tokenized)}")
+    # print(f"len of catch_all initial = {len(catch_all)}")
+
 
     #loop over the words
     for word_pair_ind in range(len(pairs)):
@@ -81,7 +90,7 @@ def perturb_dataset(args, ds_train_tokenized, tokenizer):
         def perform_swap(input):
             input["input_ids"][input["target_ind"]] = word_pair[1]
             return input
-        finalized_dataset = swap_dataset.map(perform_swap, num_proc=args.CONST["num_cpus"], load_from_cache_file=False)
+        finalized_dataset = swap_dataset.map(perform_swap, num_proc=args.CONST["num_cpus"])
 
         # concatenates the swapped with unswapped. Notice that swapped is placed before unswapped
         concatenated_dataset = concatenate_datasets([finalized_dataset, other_dataset])
@@ -98,6 +107,10 @@ def perturb_dataset(args, ds_train_tokenized, tokenizer):
 
     return catch_all
 
+###########################################################
+# For query.py
+###########################################################
+
 #function that performs inference and writes into csv file for given dataloader
 def inference_with_dataloader(args, dataloader, model, device, orig_word, new_word, writer, is_swapped):
     for step, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
@@ -106,6 +119,7 @@ def inference_with_dataloader(args, dataloader, model, device, orig_word, new_wo
         with torch.no_grad():
             output = model(batch["input_ids"].to(device)).logits.cpu()
 
+        # ipdb.set_trace()
         # focus on the logits of the word pair position
         output = output[torch.arange(len(output)), batch["target_ind"] - 1].contiguous()
 
@@ -118,6 +132,7 @@ def inference_with_dataloader(args, dataloader, model, device, orig_word, new_wo
 
         # calculate the rank
         rank = torch.argsort(output, descending=True, dim=1)
+
         orig_word_rank = (rank == orig_word).nonzero(as_tuple=True)[1].unsqueeze(1)
         new_word_rank = (rank == new_word).nonzero(as_tuple=True)[1].unsqueeze(1)
 
@@ -147,7 +162,7 @@ def query_dataset(args, pair_dataset, model, device):
 
         # split into swapped and no swapped
         swap_dataset = dataset.select(range(args.num_to_collect))
-        other_dataset = dataset.select(range(args.num_to_collect, len(dataset)))
+        other_dataset = dataset.select(range(args.num_to_collect, 2*args.num_to_collect))
 
         # initialize dataloaders
         swap_dataloader = DataLoader(swap_dataset, batch_size=args.CONST["batch_size"])
@@ -162,6 +177,10 @@ def query_dataset(args, pair_dataset, model, device):
 
     csvfile.close()
     return
+
+###########################################################
+# For analuze.py
+###########################################################
 
 
 

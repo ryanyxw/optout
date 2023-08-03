@@ -7,7 +7,7 @@ import os
 import random
 import torch
 
-from word_substitutions import query_dataset, query_dataset_base
+from word_substitutions import query_dataset
 
 CONST={
     #The type of tokenzier we are using
@@ -57,15 +57,6 @@ def main(args):
     # For performing word substitutions
     ###########################################################
 
-    if (args.experiment == "word_substitution_base"):
-        device = setup_device()
-        print(f"setup device on {device}")
-        pair_dataset = setup_dataset(args)
-        print("pair_dataset setup successful")
-        model = setup_model(args, device)
-        print("model setup successful")
-        query_dataset_base(args, pair_dataset, model, device)
-        print("complete")
 
     if (args.experiment == "word_substitution"):
         device = setup_device()

@@ -24,7 +24,7 @@ CONST={
 }
 
 wandb.init(
-    project="trainer_model_3",
+    project="model_trainer_4",
 )
 
 
@@ -60,25 +60,25 @@ def setup_training_arguments(args):
 
     training_args = TrainingArguments(
         output_dir=args.model_output_dir,
+        # overwrite_output_dir=True,
         evaluation_strategy="steps",
-        per_device_train_batch_size=16,
-        per_device_eval_batch_size=16,
+        per_device_train_batch_size=6,
+        per_device_eval_batch_size=6,
         gradient_accumulation_steps=8,
         eval_accumulation_steps=1,
         learning_rate=0.0003,
         num_train_epochs=5,
         lr_scheduler_type="cosine",
         warmup_steps=2000,
+        # log_level="debug",
         save_strategy="steps",
-        save_steps=3522, #stores 5 times per epoch, for 25 times total with 5 epochs
-        logging_steps=30,
-        eval_steps=30,
+        save_steps=2348, #stores 5 times per epoch, for 25 times total with 5 epochs
+        logging_steps=50,
+        eval_steps=100,
         seed=args.CONST["seed"],
         report_to="wandb",
         weight_decay=0.01,
-        fp16=True,
-        fp16_full_eval=True,
-
+        # fp16=True,
     )
     return training_args
 
@@ -97,21 +97,21 @@ def main(args):
 
     print(f"len f training datset = {len(train_dataset)}")
 
-    def compute_metrics(eval_preds):
-        logits, labels = eval_preds
-        # ipdb.set_trace()
-
-        if (isinstance(logits, tuple)):
-            logits = logits[0] #logits are stored in the first element
-
-        num_sequences = labels.size(0)
-
-        labels = labels[:, 1:].reshape(-1)
-        logits = logits[:, :-1, :].reshape(-1, logits.size(-1))
-
-        loss_func = torch.nn.CrossEntropyLoss(reduce=False)
-
-        return loss_func(logits, labels) / num_sequences
+    # def compute_metrics(eval_preds):
+    #     logits, labels = eval_preds
+    #     # ipdb.set_trace()
+    #
+    #     if (isinstance(logits, tuple)):
+    #         logits = logits[0] #logits are stored in the first element
+    #
+    #     num_sequences = labels.size(0)
+    #
+    #     labels = labels[:, 1:].reshape(-1)
+    #     logits = logits[:, :-1, :].reshape(-1, logits.size(-1))
+    #
+    #     loss_func = torch.nn.CrossEntropyLoss(reduce=False)
+    #
+    #     return loss_func(logits, labels) / num_sequences
 
     trainer = Trainer(
         model=model,

@@ -16,6 +16,69 @@ import ipdb
 ###########################################################
 # For preprocess.py
 ###########################################################
+#this function is used to collect the "negative" training examples for the propensity model - the new word dataset
+def propensity_perturb_dataset(args, ds_train, tokenizer):
+
+    # This tokenizes the word pairs into ids
+    def tokenize_pairs(pairs):
+        for pair_ind in range(len(pairs)):
+            # tokenizing with an extra space because of bpe tokenization
+            pairs[pair_ind] = tokenizer.encode(" " + pairs[pair_ind][0]) + tokenizer.encode(" " + pairs[pair_ind][1])
+        return pairs
+
+    # tokenizes word pair keywords
+    pairs = tokenize_pairs(args.CONST["word_list"])
+
+    pair_dataset_dict = dict()
+
+    #loops through all the words
+    for word_pair_ind in range(len(pairs)):
+        word_pair = pairs[word_pair_ind]
+
+        #filter out sentences where it has no repetition with any word in pairs (orig_word or new_word alike)
+        def select_word(input):
+            if word_pair[1] in input["input_ids"]:
+                # reject if more than one keyword from entire list (orig_word and new_word both included)
+                for i in range(len(pairs)):
+                    # #if not in the target_pair, check both orig and new word
+                    # if (i != word_pair_ind):
+                    #     if pairs[i][0] in input["input_ids"] or pairs[i][1] in input["input_ids"]:
+                    #         return False
+                    # #if in the target pair, check the orig_word
+                    # else:
+                    #     if pairs[word_pair_ind][0] in input["input_ids"]:
+                    #         return False
+                    if pairs[i][0] in input["input_ids"]:
+                        return False
+                    # reject if index smaller than min_prefix_token_len
+                    if (input["input_ids"].index(word_pair[1]) < args.min_prefix_token_len - 255):
+                        return False
+                # accept
+                return True
+            # reject if no keyword match
+            return False
+
+        new_word_dataset = ds_train.filter(select_word, num_proc=args.CONST["num_cpus"])
+
+        #appends the target indexes for each sequence
+        def get_target_word_ind(input):
+            input["target_ind"] = input["input_ids"].index(word_pair[1])
+            return input
+
+        new_word_dataset = new_word_dataset.map(get_target_word_ind, num_proc=args.CONST["num_cpus"])
+
+        pair_dataset_dict[f"{word_pair[0]}_{word_pair[1]}"] = new_word_dataset
+
+        # print(tokenizer.decode(new_word_dataset[0]["input_ids"]))
+        #
+        # print(new_word_dataset)
+        # print(0/0)
+        #
+        # break
+
+    pair_dataset = DatasetDict(pair_dataset_dict)
+    return pair_dataset
+
 
 #This function takes in tokenized ds_train and creates a DatasetDict that stores dataset for each word pair
 def perturb_dataset(args, ds_train_tokenized, tokenizer):

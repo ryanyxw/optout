@@ -7,7 +7,7 @@ import os
 import random
 import torch
 
-from word_substitutions import perturb_dataset
+from word_substitutions import perturb_dataset, propensity_perturb_dataset
 from misc import run_common_words_experiment, test_tokenizer
 
 CONST={
@@ -18,13 +18,20 @@ CONST={
     #The following seed is not only for the shuffle
 
     "seed": 416,
-    "word_list": [["night", "dark"],
-                 ["security", "safety"],
-                 ["employ", "hire"],
-                 ["month", "minute"],
-                 ["car", "bike"],
-                 ["yes", "no"],
-                 ["fast", "slow"]],
+    "word_list": [
+
+                 ["color", "colour"],
+                 ["analyze", "analyse"],
+
+                 ["car", "vehicle"],
+                 ["movie", "film"],
+                 ["house", "home"],
+                 ["rich", "wealthy"],
+                 ["quick", "fast"],
+                 ["beautiful", "pretty"],
+
+                 ["small", "big"],
+                 ["young", "old"]],
     #This is the max_context_length of the tokenizer
     "context_length": 1024
 }
@@ -53,6 +60,7 @@ def tokenize_dataset(args, dataset, tokenizer):
             max_length=args.CONST["context_length"],
             return_overflowing_tokens=True,
             return_length=True,
+            return_tensors="pt"
         )
         input_batch = []
         attention_batch = []
@@ -120,6 +128,14 @@ def main(args):
             }
         )
         save_data(args, tokenized_datasets)
+
+    if (args.experiment == "propensity_model"):
+        ds_train, _, _ = setup_dataset(args)
+        print("finished loading dataset! ")
+        ds_train_tokenized = tokenize_dataset(args, ds_train, tokenizer)
+        print(f"length of test dataset is {len(ds_train_tokenized)}")
+        pair_dataset = propensity_perturb_dataset(args, ds_train_tokenized, tokenizer)
+        save_data(args, pair_dataset)
 
     ###########################################################
     # Misc operations

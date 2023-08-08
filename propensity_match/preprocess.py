@@ -175,37 +175,30 @@ def main(args):
         print(orig_pair_converted_dataset)
         print(new_pair_dataset)
 
-        # masks the corresponding
-        def perform_mask(input):
-            input_ids = input["input_ids"]
+        for key in orig_pair_converted_dataset:
+            first_word_ind, second_word_ind = list(map(lambda x: int(x), key.split("_")))
 
-            # Creates the masking label
-            labels = torch.ones_like(input_ids) * -100
-            labels[input["target_ind"]] = input_ids[input["target_ind"]]
+            # masks the corresponding
+            def perform_mask(input):
+                input_ids = input["input_ids"]
 
-            # inserts the masking token to input_ids
-            input_ids[input["target_ind"]] = tokenizer_propensity.mask_token_id
+                # Creates the masking label
+                labels = int(input["input_ids"][input["target_ind"]] == second_word_ind)
 
-            # shorten them to roberta context length
-            context_end_ind = min(input["target_ind"] + args.CONST["propensity_context_length"] // 2,
-                                  args.CONST["context_length"])
-            labels = labels[context_end_ind - args.CONST["propensity_context_length"]:context_end_ind]
-            input_ids = input_ids[context_end_ind - args.CONST["propensity_context_length"]:context_end_ind]
+                # shorten them to roberta context length
+                context_end_ind = min(input["target_ind"] + args.CONST["propensity_context_length"] // 2,
+                                      args.CONST["context_length"])
+                input_ids = input_ids[context_end_ind - args.CONST["propensity_context_length"]:context_end_ind]
 
-            input["labels"] = labels
-            input["input_ids"] = input_ids
-            input["attention_mask"] = input["attention_mask"][
-                                      context_end_ind - args.CONST["propensity_context_length"]:context_end_ind]
-            input["target_ind"] = input["target_ind"] - (context_end_ind - args.CONST["propensity_context_length"])
-            return input
+                input["labels"] = labels
+                input["input_ids"] = input_ids
+                input["attention_mask"] = input["attention_mask"][
+                                          context_end_ind - args.CONST["propensity_context_length"]:context_end_ind]
+                input["target_ind"] = input["target_ind"] - (context_end_ind - args.CONST["propensity_context_length"])
+                return input
 
-        orig_pair_converted_dataset = orig_pair_converted_dataset.map(perform_mask)
-        new_pair_dataset = new_pair_dataset.map(perform_mask)
-
-        # print(orig_pair_converted_dataset)
-        # print(new_pair_dataset)
-        # print(0/0)
-
+            orig_pair_converted_dataset[key] = orig_pair_converted_dataset[key].map(perform_mask)
+            new_pair_dataset[key] = new_pair_dataset[key].map(perform_mask)
 
         save_data(args, new_pair_dataset, args.output_file_newword)
         save_data(args, orig_pair_converted_dataset, args.output_file_oldword)

@@ -24,7 +24,7 @@ CONST={
 }
 
 wandb.init(
-    project="model_trainer_4",
+    project="model_trainer_base",
 )
 
 

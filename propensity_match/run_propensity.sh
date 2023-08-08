@@ -19,11 +19,14 @@ mkdir -p ${OUT_DIR}
 #  --experiment baseline_model\
 #  --output_file ${OUT_DIR}/tokenized_dataset_base\
 
-#For the propensity model preprocess
+#For the propensity model preprocess. 257 because roberta takes 512 max context
 #python preprocess.py\
 #  --experiment propensity_model\
-#  --output_file ${OUT_DIR}/word_pair_datasets_3_newword\
-#  --min_prefix_token_len 512
+#  --tokenized_orig_data_dir ${OUT_DIR}/word_pair_datasets_3\
+#  --output_file_newword ${OUT_DIR}/word_pair_datasets_3_newword\
+#  --output_file_oldword ${OUT_DIR}/word_pair_datasets_3_oldword\
+#  --min_prefix_token_len 257\
+#  --num_to_collect 1000
 
 #For training.py. Make sure that the steps is greater than 100k
 #CUDA_AVAILABLE_DEVICES=0,1,5,6 accelerate launch train.py\
@@ -35,8 +38,8 @@ mkdir -p ${OUT_DIR}
 #python query.py\
 #  --experiment word_substitution\
 #  --input_file ${OUT_DIR}/word_pair_datasets_3\
-#  --output_file ${OUT_DIR}/model_4_inference.csv\
-#  --inference_model ${OUT_DIR}/model_trainer_4/checkpoint-11740\
+#  --output_file ${OUT_DIR}/model_4_epoch5_inference.csv\
+#  --inference_model ${OUT_DIR}/model_trainer_4/checkpoint-58700\
 #  --num_to_collect 1000\
 
 #for analysis.py
@@ -46,8 +49,16 @@ mkdir -p ${OUT_DIR}
 
 #for train_propensity_model.py
 python train_propensity_model.py\
-  --tokenized_orig_data_dir ${OUT_DIR}/word_pair_datasets_3\
+  --tokenized_orig_data_dir ${OUT_DIR}/word_pair_datasets_3_oldword\
   --tokenized_new_data_dir ${OUT_DIR}/word_pair_datasets_3_newword\
   --model_output_dir ${OUT_DIR}/propensity_model_2156\
-  --num_to_collect 1000\
+  --num_to_collect 10401\
+
+#for query.py to query the propensity model
+#python query.py\
+#  --experiment propensity_model\
+#  --tokenized_new_data_dir ${OUT_DIR}/word_pair_datasets_3_newword\
+#  --output_file ${OUT_DIR}/propensity_scores_2156.csv\
+#  --inference_model ${OUT_DIR}/propensity_model_2156/checkpoint-1288\
+#  --num_to_collect 10401\
 

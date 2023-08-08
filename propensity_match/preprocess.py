@@ -7,12 +7,14 @@ import os
 import random
 import torch
 
-from word_substitutions import perturb_dataset, propensity_perturb_dataset
+from word_substitutions import perturb_dataset, propensity_perturb_dataset, convert_dataset_to_propensity_tokenized
 from misc import run_common_words_experiment, test_tokenizer
 
 CONST={
     #The type of tokenzier we are using
     "pretrained_tokenizer": "EleutherAI/gpt-neo-125m",
+    #The type of tokenizer for propensity model
+    "propensity_tokenizer": "roberta-base",
     #Number of cpus used for parallization
     "num_cpus": 100,
     #The following seed is not only for the shuffle
@@ -32,11 +34,17 @@ CONST={
 
                  ["small", "big"],
                  ["young", "old"]],
-    #This is the max_context_length of the tokenizer
-    "context_length": 1024
+    # This is the max_context_length of the tokenizer
+    "context_length": 1024,
+    # This is the context length of gpt-neo or whatever model we are training
+    "propensity_context_length": 512,
 }
 
-def setup_tokenizer(args):
+def setup_tokenizer(args, is_propensity=False):
+    if is_propensity:
+        tokenizer = AutoTokenizer.from_pretrained(args.CONST["propensity_tokenizer"])
+        tokenizer.pad_token = tokenizer.eos_token
+        return tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.CONST["pretrained_tokenizer"])
     tokenizer.pad_token=tokenizer.eos_token
     return tokenizer
@@ -81,18 +89,19 @@ def tokenize_dataset(args, dataset, tokenizer):
     # tokenized_datasets.save_to_disk(args.output_file)
     return tokenized_datasets
 
-def save_data(args, tokenized_datasets):
+def save_data(args, tokenized_datasets, output_file_name):
     # Saves the dataset to disk
-    tokenized_datasets.save_to_disk(args.output_file, num_proc=args.CONST["num_cpus"])
+    tokenized_datasets.save_to_disk(output_file_name, num_proc=args.CONST["num_cpus"])
 
 def main(args):
-    tokenizer = setup_tokenizer(args)
 
     ###########################################################
     # For performing word substitutions
     ###########################################################
 
     if (args.experiment == "word_substitution"):
+        tokenizer = setup_tokenizer(args)
+
         #loads the corresponding train and validation datasets
         ds_train, ds_validation, ds_test = setup_dataset(args)
         print("finished loading dataset! ")
@@ -114,6 +123,8 @@ def main(args):
         save_data(args, tokenized_datasets)
 
     if (args.experiment == "baseline_model"):
+        tokenizer = setup_tokenizer(args)
+
         ds_train, ds_validation, ds_test = setup_dataset(args)
         print("finished loading dataset! ")
 
@@ -129,13 +140,75 @@ def main(args):
         )
         save_data(args, tokenized_datasets)
 
+    #This is just to save the datasets that will be used to train the propensity model
     if (args.experiment == "propensity_model"):
+        #tokenizer for roberta
+        tokenizer_propensity = setup_tokenizer(args, is_propensity=True)
+        #tokenizer for actual language model
+        tokenizer_LM = setup_tokenizer(args)
+
+        #converts orig_word tokenized dataset (of LM) to tokenized form for propensity model
+        #    output should have input_ids, attention_mask, and target_ind
+        orig_pair_dataset = load_from_disk(os.path.join(os.getcwd(), args.tokenized_orig_data_dir))
+        #select the sequences that have not been swapped
+        for key in orig_pair_dataset:
+            orig_pair_dataset[key] = orig_pair_dataset[key].select(range(args.num_to_collect, len(orig_pair_dataset[key])))
+
+        #convert these data to propensity tokenization
+        orig_pair_converted_dataset = convert_dataset_to_propensity_tokenized(args, orig_pair_dataset, tokenizer_propensity, tokenizer_LM)
+
+
+        #creates new_word tokenized dataset
         ds_train, _, _ = setup_dataset(args)
         print("finished loading dataset! ")
-        ds_train_tokenized = tokenize_dataset(args, ds_train, tokenizer)
+        ds_train_tokenized = tokenize_dataset(args, ds_train, tokenizer_propensity)
         print(f"length of test dataset is {len(ds_train_tokenized)}")
-        pair_dataset = propensity_perturb_dataset(args, ds_train_tokenized, tokenizer)
-        save_data(args, pair_dataset)
+
+        print(ds_train_tokenized)
+
+        #filters out the sentences that contains the new words for each pair
+        #   outputs should have input_ids, attention_mask, and target_ind
+        new_pair_dataset = propensity_perturb_dataset(args, ds_train_tokenized, tokenizer_propensity)
+
+        orig_pair_converted_dataset.set_format("torch")
+        new_pair_dataset.set_format("torch")
+        print(orig_pair_converted_dataset)
+        print(new_pair_dataset)
+
+        # masks the corresponding
+        def perform_mask(input):
+            input_ids = input["input_ids"]
+
+            # Creates the masking label
+            labels = torch.ones_like(input_ids) * -100
+            labels[input["target_ind"]] = input_ids[input["target_ind"]]
+
+            # inserts the masking token to input_ids
+            input_ids[input["target_ind"]] = tokenizer_propensity.mask_token_id
+
+            # shorten them to roberta context length
+            context_end_ind = min(input["target_ind"] + args.CONST["propensity_context_length"] // 2,
+                                  args.CONST["context_length"])
+            labels = labels[context_end_ind - args.CONST["propensity_context_length"]:context_end_ind]
+            input_ids = input_ids[context_end_ind - args.CONST["propensity_context_length"]:context_end_ind]
+
+            input["labels"] = labels
+            input["input_ids"] = input_ids
+            input["attention_mask"] = input["attention_mask"][
+                                      context_end_ind - args.CONST["propensity_context_length"]:context_end_ind]
+            input["target_ind"] = input["target_ind"] - (context_end_ind - args.CONST["propensity_context_length"])
+            return input
+
+        orig_pair_converted_dataset = orig_pair_converted_dataset.map(perform_mask)
+        new_pair_dataset = new_pair_dataset.map(perform_mask)
+
+        # print(orig_pair_converted_dataset)
+        # print(new_pair_dataset)
+        # print(0/0)
+
+
+        save_data(args, new_pair_dataset, args.output_file_newword)
+        save_data(args, orig_pair_converted_dataset, args.output_file_oldword)
 
     ###########################################################
     # Misc operations
@@ -200,6 +273,24 @@ if __name__ == "__main__":
         help="the datasets that stores the examples of each word pair (used for dataloaders during inference"
     )
 
+    parser.add_argument(
+        "--tokenized_orig_data_dir",
+        default="codeparrot-ds-accelerate",
+        type=str,
+        help="name of folder that holds old word pair filtered data"
+    )
+
+    parser.add_argument(
+        "--output_file_newword",
+        type=str,
+        help="the file to output"
+    )
+
+    parser.add_argument(
+        "--output_file_oldword",
+        type=str,
+        help="the file to output"
+    )
 
     ###########################################################
     #To add the CONST global variables

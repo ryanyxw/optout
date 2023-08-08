@@ -13,9 +13,6 @@ import wandb
 import random
 import ipdb
 
-from word_substitutions import propensity_perturb_dataset
-
-
 
 CONST={
     #The type of tokenzier we are using
@@ -24,9 +21,9 @@ CONST={
     #The following seed is not only for the shuffle
     "seed": 416,
     #This is the max_context_length of the tokenizer
-    "context_length": 512,
+    "context_length": 1024,
     #This is the context length of gpt-neo or whatever model we are training
-    "LM_context_length": 1024,
+    "propensity_context_length": 1024,
 }
 
 wandb.init(
@@ -62,38 +59,13 @@ def setup_datasets(args, tokenizer):
 
     #for each word pair
     # for key in orig_pair_dataset:
-    key = "2156_1363"
+    key = "790_184" #the key for house home pair
 
     orig_word_dataset = orig_pair_dataset[key]
     new_word_dataset = new_pair_dataset[key]
 
-    #select the examples that the model has not been traine don
-    orig_word_dataset = orig_word_dataset.select(range(2 * args.num_to_collect, len(orig_word_dataset)))
-
-    #masks the corresponding
-    def perform_mask(input):
-        input_ids = input["input_ids"]
-
-        #Creates the masking label
-        labels = torch.ones_like(input_ids) * -100
-        labels[input["target_ind"]] = input_ids[input["target_ind"]]
-
-        #inserts the masking token to input_ids
-        input_ids[input["target_ind"]] = tokenizer.mask_token_id
-
-        #shorten them to roberta context length
-        context_end_ind = min(input["target_ind"] + args.CONST["context_length"] // 2, args.CONST["LM_context_length"])
-        labels = labels[context_end_ind - args.CONST["context_length"]:context_end_ind]
-        input_ids = input_ids[context_end_ind - args.CONST["context_length"]:context_end_ind]
-
-        input["labels"] = labels
-        input["input_ids"] = input_ids
-        input["attention_mask"] = input["attention_mask"][context_end_ind - args.CONST["context_length"]:context_end_ind]
-        input["target_ind"] = input["target_ind"] - (context_end_ind - args.CONST["context_length"])
-        return input
-
-    orig_word_dataset = orig_word_dataset.map(perform_mask)
-    new_word_dataset = new_word_dataset.map(perform_mask)
+    #select a portion of the new_word_dataset that will be kept for propensity matching later
+    new_word_dataset = new_word_dataset.shuffle(args.CONST["seed"]).select(range(args.num_to_collect))
 
     # print(orig_word_dataset)
     # print(0/0)
@@ -102,8 +74,8 @@ def setup_datasets(args, tokenizer):
 
     catch_all = catch_all.shuffle(seed=args.CONST["seed"])
 
-    eval_dataset = catch_all.select(range(1000))
-    train_dataset = catch_all.select(range(1000, len(catch_all)))
+    eval_dataset = catch_all.select(range(200))
+    train_dataset = catch_all.select(range(200, len(catch_all)))
     return train_dataset, eval_dataset
 
 def setup_training_arguments(args):
